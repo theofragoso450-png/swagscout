@@ -27,4 +27,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: docker build -t swagscout:ci .
+      - uses: docker/setup-buildx-action@v3
+
+      # Build-only (no push/load): validates the image compiles and warms the
+      # GHA layer cache. mode=max caches intermediate stages too, so PRs that
+      # only touch src/ reuse the npm-ci layers from main.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: swagscout:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
