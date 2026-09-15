@@ -32,6 +32,6 @@
     "vitest": "^3.2.7"
   },
   "allowScripts": {
-    "esbuild@0.28.2": true
+    "esbuild": true
   }
 }
