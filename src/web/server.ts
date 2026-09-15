@@ -1,0 +1,195 @@
+import Fastify from "fastify";
+import type { Store } from "../core/store.js";
+import { ALL_MARKETS, MARKET_LABEL } from "../types.js";
+import { BRANDS } from "../config/brands.js";
+import { THRESHOLD_RULES } from "../config/rules.js";
+import type { Deal } from "../types.js";
+
+const PAGE = `
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SwagScout — archive fashion deals</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:#0d1117; color:#e6edf3; }
+  header { padding:18px 24px; border-bottom:1px solid #21262d; display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  h1 span { color:#3fb950; }
+  .sub { color:#8b949e; font-size:13px; }
+  .bar { padding:12px 24px; display:flex; gap:8px; flex-wrap:wrap; border-bottom:1px solid #21262d; }
+  select, input { background:#161b22; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:6px 10px; font-size:13px; }
+  main { padding: 16px 24px; }
+  .deal { border:1px solid #21262d; border-radius:10px; padding:12px 14px; margin-bottom:10px; display:flex; gap:14px; background:#161b22; }
+  .deal img { width:72px; height:72px; object-fit:cover; border-radius:8px; background:#21262d; }
+  .meta { flex:1; min-width:0; }
+  .title { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .title a { color:#e6edf3; text-decoration:none; }
+  .title a:hover { color:#58a6ff; }
+  .row { font-size:12px; color:#8b949e; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap; }
+  .badge { background:#21262d; border-radius:999px; padding:1px 8px; font-size:11px; }
+  .score { color:#3fb950; font-weight:700; }
+  .reasons { font-size:12px; color:#d29922; margin-top:4px; }
+  .proxies a { color:#58a6ff; font-size:12px; margin-right:8px; text-decoration:none; }
+  .empty { color:#8b949e; padding:32px 0; text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Swag<span>Scout</span></h1>
+  <div class="sub" id="stats">loading…</div>
+</header>
+<div class="bar">
+  <select id="market"><option value="">All markets</option></select>
+  <select id="brand"><option value="">All brands</option></select>
+  <select id="sort">
+    <option value="found">Newest</option>
+    <option value="score">Best score</option>
+    <option value="price">Lowest price</option>
+  </select>
+  <input id="q" type="search" placeholder="Filter titles…">
+</div>
+<main id="feed"><div class="empty">No deals yet — the poller is warming up.</div></main>
+<script>
+  const markets = ${JSON.stringify(ALL_MARKETS.map((m) => ({ id: m, label: MARKET_LABEL[m] })))};
+  const brands = ${JSON.stringify(BRANDS.map((b) => ({ key: b.key, name: b.name })))};
+  for (const m of markets) {
+    document.getElementById("market").insertAdjacentHTML("beforeend", \`<option value="\${m.id}">\${m.label}</option>\`);
+  }
+  for (const b of brands) {
+    document.getElementById("brand").insertAdjacentHTML("beforeend", \`<option value="\${b.key}">\${b.name}</option>\`);
+  }
+  let timer;
+  async function refresh() {
+    const p = new URLSearchParams();
+    const m = document.getElementById("market").value;
+    const b = document.getElementById("brand").value;
+    const s = document.getElementById("sort").value;
+    const q = document.getElementById("q").value;
+    if (m) p.set("market", m);
+    if (b) p.set("brand", b);
+    if (s) p.set("sort", s);
+    if (q) p.set("q", q);
+    const res = await fetch("/api/deals?" + p.toString());
+    const data = await res.json();
+    const feed = document.getElementById("feed");
+    if (!data.deals.length) { feed.innerHTML = '<div class="empty">No deals match.</div>'; }
+    else feed.innerHTML = data.deals.map(render).join("");
+    document.getElementById("stats").textContent = data.stats;
+  }
+  function render(d) {
+    const reasons = (d.reasons||[]).map(r => "• " + r.detail).join(" &nbsp; ");
+    const proxies = Object.entries(d.proxy||{}).map(([k,v]) => \`<a href="\${v}" target="_blank">\${k[0].toUpperCase()+k.slice(1)}</a>\`).join("");
+    return \`<div class="deal">
+      \${d.imageUrl ? \`<img src="\${d.imageUrl}" loading="lazy">\` : "<img src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' >"}
+      <div class="meta">
+        <div class="title"><a href="\${d.url}" target="_blank">\${escapeHtml(d.title)}</a></div>
+        <div class="row">
+          <span class="badge">\${d.marketLabel}</span>
+          <span>\${d.priceLabel}</span>
+          <span class="score">score \${d.score}</span>
+          \${d.endsInMin != null && d.endsInMin > 0 ? \`<span>ends in \${fmtDur(d.endsInMin)}</span>\` : ""}
+        </div>
+        <div class="reasons">\${reasons}</div>
+        <div class="proxies">\${proxies}</div>
+      </div>
+    </div>\`;
+  }
+  function fmtDur(min) {
+    if (min < 60) return min + "m";
+    if (min < 1440) return Math.round(min/60) + "h";
+    return Math.round(min/1440) + "d";
+  }
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  for (const id of ["market","brand","sort"]) document.getElementById(id).addEventListener("change", refresh);
+  let debounceTimer;
+  document.getElementById("q").addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(refresh, 300);
+  });
+  refresh();
+  setInterval(refresh, 20000);
+</script>
+</body>
+</html>
+`;
+
+export interface DashboardServer {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+export function startDashboard(
+  store: Store,
+  port: number,
+  getStats: () => string,
+): DashboardServer {
+  const app = Fastify({ logger: false });
+
+  app.get("/", async (_req, reply) => {
+    // Fastify serializes plain string returns as JSON — must set HTML type
+    return reply.type("text/html; charset=utf-8").send(PAGE);
+  });
+
+  interface DealsQuery {
+    market?: string;
+    brand?: string;
+    sort?: string;
+    q?: string;
+  }
+
+  app.get<{ Querystring: DealsQuery }>("/api/deals", async (req) => {
+    const { market, brand, sort, q } = req.query;
+    // NB: "all" is a wildcard inside recentDeals — adding it alongside a
+    // brand key would make the brand filter a no-op. The third arg scopes
+    // the SQL to the brand so niche brands aren't starved by newer deals.
+    let deals: Deal[] = store.recentDeals(brand ? [brand] : ["all"], 200, brand);
+
+    if (market) deals = deals.filter((d) => d.listing.market === market);
+    if (q) deals = deals.filter((d) => d.listing.title.toLowerCase().includes(q.toLowerCase()));
+    if (sort === "score") deals = [...deals].sort((a, b) => b.score - a.score);
+    if (sort === "price") deals = [...deals].sort((a, b) => a.listing.priceUsd - b.listing.priceUsd);
+
+    return {
+      deals: deals.slice(0, 80).map((d) => ({
+        title: d.listing.title,
+        url: d.listing.url,
+        imageUrl: d.listing.imageUrl,
+        marketLabel: MARKET_LABEL[d.listing.market],
+        priceLabel:
+          d.listing.currency === "JPY"
+            ? `¥${d.listing.price.toLocaleString("en-US")} ≈ $${d.listing.priceUsd.toFixed(0)}`
+            : `$${d.listing.priceUsd.toFixed(2)}`,
+        score: d.score,
+        reasons: d.reasons,
+        proxy: d.proxy,
+        endsInMin: d.listing.endsAt
+          ? Math.round((Date.parse(d.listing.endsAt) - Date.now()) / 60_000)
+          : null,
+      })),
+      stats: getStats(),
+    };
+  });
+
+  app.get("/api/health", async () => {
+    return {
+      ok: true,
+      markets: ALL_MARKETS,
+      rules: THRESHOLD_RULES.length,
+      brands: BRANDS.length,
+    };
+  });
+
+  return {
+    async start() {
+      await app.listen({ port, host: "0.0.0.0" });
+    },
+    async stop() {
+      await app.close();
+    },
+  };
+}

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+.env
+*.log
+.freebuff/
+Thumbs.db
+desktop.ini
