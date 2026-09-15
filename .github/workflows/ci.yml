@@ -37,7 +37,8 @@ jobs:
           docker build -t swagscout:ci .
           BUILD_SECONDS=$(( $(date +%s) - START ))
           echo "Docker build took ${BUILD_SECONDS}s"
-          # LIVE-FIRE TEST: threshold forced to 1s so the warning must fire.
-          if [ "$BUILD_SECONDS" -ge 1 ]; then
+          # ~35s is the buildx+cache machinery tax measured in PRs #3/#5; caching
+          # only breaks even once the build itself comfortably exceeds it.
+          if [ "$BUILD_SECONDS" -ge 90 ]; then
             echo "::warning::Docker build took ${BUILD_SECONDS}s (threshold 90s). Dependency layers are heavy enough that buildx layer caching (mode=max, see PRs #3/#5) is worth re-measuring before assuming a plain build is fastest."
           fi
