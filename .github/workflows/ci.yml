@@ -13,7 +13,9 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 23
+          # Node 24: vitest >=4.1.11 (the GHSA-82fw-gwwq-j7x9 fix) requires it,
+          # and it matches the Dockerfile's node:24-slim runtime.
+          node-version: 24
           cache: npm
 
       - run: npm ci
