@@ -27,14 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
-
-      # Build-only (no push/load): validates the image compiles and warms the
-      # GHA layer cache. mode=max caches intermediate stages too, so PRs that
-      # only touch src/ reuse the npm-ci layers from main.
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: swagscout:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      # Plain build: at this image size (~20s of real work) the buildx + GHA
+      # cache machinery costs ~35s in fixed overhead — measured slower warm
+      # (59s) than a no-cache build (26s). Revisit only if the dependency
+      # tree grows heavy enough for cached layers to beat the tax.
+      - run: docker build -t swagscout:ci .
