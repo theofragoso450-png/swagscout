@@ -1,5 +1,12 @@
 import { request, Agent } from "undici";
 
+/**
+ * Shared dispatcher: undici v8 negotiates HTTP/2 by default over TLS; this
+ * scraper's behavior was built and tested against HTTP/1.1 (timeouts,
+ * redirect handling, per-host politeness), so pin h1 explicitly.
+ */
+const dispatcher = new Agent({ allowH2: false });
+
 const MAX_REDIRECTS = 5;
 
 export interface FetchOptions {
@@ -71,6 +78,7 @@ export class HttpClient {
   async postJson<T>(url: string, body: unknown, opts: FetchOptions = {}): Promise<T> {
     const res = await request(url, {
       method: "POST",
+      dispatcher,
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -121,6 +129,7 @@ export class HttpClient {
   ): Promise<{ statusCode: number; body: { text(): Promise<string> } }> {
     const res = await request(url, {
       method: "GET",
+      dispatcher,
       headers: {
         "User-Agent": UA,
         Accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
