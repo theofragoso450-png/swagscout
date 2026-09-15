@@ -29,6 +29,16 @@ jobs:
 
       # Plain build: at this image size (~20s of real work) the buildx + GHA
       # cache machinery costs ~35s in fixed overhead — measured slower warm
-      # (59s) than a no-cache build (26s). Revisit only if the dependency
-      # tree grows heavy enough for cached layers to beat the tax.
-      - run: docker build -t swagscout:ci .
+      # (59s) than a no-cache build (26s). The timing below flags the moment
+      # the build grows heavy enough that caching would likely pay again.
+      - name: Build image (timed)
+        run: |
+          START=$(date +%s)
+          docker build -t swagscout:ci .
+          BUILD_SECONDS=$(( $(date +%s) - START ))
+          echo "Docker build took ${BUILD_SECONDS}s"
+          # ~35s is the buildx+cache machinery tax measured in PR #5; caching
+          # only breaks even once the build itself comfortably exceeds it.
+          if [ "$BUILD_SECONDS" -ge 90 ]; then
+            echo "::warning::Docker build took ${BUILD_SECONDS}s (threshold 90s). Dependency layers are heavy enough that buildx layer caching (mode=max, see PRs #3/#5) is worth re-measuring before assuming a plain build is fastest."
+          fi
