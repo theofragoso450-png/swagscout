@@ -68,6 +68,7 @@ export function loadEnv(): Env {
     displayCurrency: (opt("DISPLAY_CURRENCY") ?? "USD").toUpperCase(),
     playwrightExecutablePath: opt("PLAYWRIGHT_EXECUTABLE_PATH"),
     logLevel: opt("LOG_LEVEL") ?? "info",
+    // Dashboard bind port (and the health endpoint Docker's healthcheck polls).
     port: num("PORT", 3080),
     dbPath: opt("DB_PATH") ?? path.join(process.cwd(), "data", "swagscout.db"),
   };
