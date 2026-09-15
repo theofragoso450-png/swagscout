@@ -9,9 +9,9 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 23
           cache: npm
@@ -25,7 +25,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Plain build: at this image size (~20s of real work) the buildx + GHA
       # cache machinery costs ~35s in fixed overhead — measured slower warm
