@@ -7,6 +7,7 @@ import {
 } from "../src/core/normalize.js";
 import { matchBrand } from "../src/config/brands.js";
 import { evaluateThreshold } from "../src/config/rules.js";
+import { extractCondition } from "../src/core/normalize.js";
 
 const base = {
   market: "yahoo" as const,
@@ -134,6 +135,41 @@ describe("normalizeListing → threshold pipeline", () => {
   it("still strips genuine price-inflation noise words", () => {
     const l = normalizeListing({ ...base, id: "n1", title: "中古 美品 送料込み", price: 1000 });
     expect(l.title).not.toContain("中古");
+  });
+});
+
+describe("extractCondition", () => {
+  it("detects new-condition markers (JP + EN)", () => {
+    expect(extractCondition("新品同様 Yohji Yamamoto シャツ")).toBe("new");
+    expect(extractCondition("未使用 ISSEY MIYAKE ワンピース")).toBe("new");
+    expect(extractCondition("Raf Simons jacket DEADSTOCK")).toBe("new");
+  });
+
+  it("detects like-new markers", () => {
+    expect(extractCondition("美品 COMME des GARCONS カーディガン")).toBe("like-new");
+    expect(extractCondition("良品 number (n)ine パーカー")).toBe("like-new");
+  });
+
+  it("detects used markers", () => {
+    expect(extractCondition("中古 Rick Owens レザージャケット")).toBe("used");
+    expect(extractCondition("Yohji Yamamoto used shirt")).toBe("used");
+    expect(extractCondition("CDG pre-owned bag")).toBe("used");
+  });
+
+  it("returns undefined when no marker is present", () => {
+    expect(extractCondition("PLAY COMME des GARCONS Tシャツ L")).toBeUndefined();
+    expect(extractCondition("")).toBeUndefined();
+  });
+
+  it("extractCondition flows into normalized listings from the raw title", () => {
+    const l = normalizeListing({ ...base, id: "c1", title: "美品 ヨウジヤマモト シャツ", price: 1000 });
+    expect(l.condition).toBe("like-new");
+    expect(l.title).not.toContain("美品"); // cleaned from display title
+  });
+
+  it("prioritizes the best condition when several markers coexist", () => {
+    expect(extractCondition("中古だが未使用 tags attached")).toBe("new");
+    expect(extractCondition("used だが美品")).toBe("like-new");
   });
 });
 

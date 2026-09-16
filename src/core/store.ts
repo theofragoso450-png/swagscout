@@ -12,6 +12,7 @@ export interface StoredListing {
   brandKey: string | null;
   item: string | null;
   size: string | null;
+  condition: string | null;
   price: number;
   currency: string;
   priceUsd: number;
@@ -60,6 +61,12 @@ export class Store {
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA synchronous = NORMAL");
     this.migrate();
+    // v0.1 migration: condition column added after the bot shipped; listings
+    // that predate it keep NULL and fall back to render-time extraction.
+    const cols = this.db.prepare("PRAGMA table_info(listings)").all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === "condition")) {
+      this.db.exec("ALTER TABLE listings ADD COLUMN condition TEXT");
+    }
 
     this.hasStmt = this.db.prepare(
       "SELECT 1 AS one FROM listings WHERE market = ? AND marketId = ? LIMIT 1",
@@ -69,16 +76,17 @@ export class Store {
     );
     this.upsertListingStmt = this.db.prepare(`
       INSERT INTO listings
-        (key, market, marketId, title, brandKey, item, size, price, currency, priceUsd,
+        (key, market, marketId, title, brandKey, item, size, condition, price, currency, priceUsd,
          url, imageUrl, endsAt, foundAt, updatedAt)
       VALUES
-        (@key, @market, @marketId, @title, @brandKey, @item, @size, @price, @currency, @priceUsd,
+        (@key, @market, @marketId, @title, @brandKey, @item, @size, @condition, @price, @currency, @priceUsd,
          @url, @imageUrl, @endsAt, @foundAt, @updatedAt)
       ON CONFLICT(key) DO UPDATE SET
         title = excluded.title,
         brandKey = excluded.brandKey,
         item = excluded.item,
         size = excluded.size,
+        condition = excluded.condition,
         price = excluded.price,
         currency = excluded.currency,
         priceUsd = excluded.priceUsd,
@@ -116,12 +124,12 @@ export class Store {
       VALUES (@listingKey, @market, @marketId, @title, @brandKey, @priceUsd, @url, @reasons, @score, @foundAt)
     `);
     this.recentDealsStmt = this.db.prepare(
-      `SELECT d.*, l.imageUrl AS imageUrl
+      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        ORDER BY d.foundAt DESC LIMIT ?`,
     );
     this.recentDealsByBrandStmt = this.db.prepare(
-      `SELECT d.*, l.imageUrl AS imageUrl
+      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        WHERE d.brandKey = ? ORDER BY d.foundAt DESC LIMIT ?`,
     );
@@ -201,6 +209,7 @@ export class Store {
       brandKey: l.brandKey ?? null,
       item: l.item ?? null,
       size: l.size ?? null,
+      condition: l.condition ?? null,
       price: l.price,
       currency: l.currency,
       priceUsd: l.priceUsd,
@@ -295,6 +304,8 @@ export class Store {
       score: number;
       foundAt: string;
       imageUrl: string | null;
+      size: string | null;
+      condition: string | null;
     };
     const rows = (
       brand !== undefined
@@ -317,6 +328,8 @@ export class Store {
           url: r.url,
           foundAt: r.foundAt,
           imageUrl: r.imageUrl ?? undefined,
+          size: r.size ?? undefined,
+          condition: r.condition ?? undefined,
         },
         proxy: proxyLinks({
           id: r.marketId,

@@ -30,6 +30,8 @@ export interface Listing {
   /** Short item descriptor (e.g. "thermal long sleeve tee"). */
   item?: string;
   size?: string;
+  /** Normalized condition derived from the marketplace's title markers. */
+  condition?: string;
   /** Listing end time, when the market exposes one (auctions). ISO string. */
   endsAt?: string;
   price: number;

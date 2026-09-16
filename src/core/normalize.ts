@@ -49,6 +49,20 @@ export function extractSize(title: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Normalize a listing's condition from the marketplace's own title markers
+ * (titles are the only structured condition signal this bot has). Returns
+ * undefined when no known marker is present. Runs on the RAW title at
+ * ingest — cleanTitle() deliberately strips these words as noise.
+ */
+export function extractCondition(title: string): string | undefined {
+  const t = title.toLowerCase();
+  if (/新品同様|未使用品?|deadstock/.test(t)) return "new";
+  if (/美品|良品|near mint|excellent/.test(t)) return "like-new";
+  if (/中古|used|pre-?owned/.test(t)) return "used";
+  return undefined;
+}
+
 export function cleanTitle(title: string): string {
   let t = title.trim();
   for (const w of NOISE_WORDS) {
@@ -68,6 +82,7 @@ export function normalizeListing(raw: RawListingInput): Listing {
     brandRaw: brand?.matched,
     item: undefined,
     size: raw.size ?? extractSize(raw.title),
+    condition: extractCondition(raw.title),
     endsAt: raw.endsAt,
     price: raw.price,
     currency: raw.currency,

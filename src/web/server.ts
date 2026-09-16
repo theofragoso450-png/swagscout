@@ -5,6 +5,13 @@ import { BRANDS } from "../config/brands.js";
 import { THRESHOLD_RULES } from "../config/rules.js";
 import type { Deal } from "../types.js";
 import { fetchThumb, isAllowedImageUrl } from "./thumbs.js";
+import { extractCondition } from "../core/normalize.js";
+
+const CONDITION_LABEL: Record<string, string> = {
+  new: "New",
+  "like-new": "Like new",
+  used: "Used",
+};
 
 const PAGE = `
 <!doctype html>
@@ -32,6 +39,10 @@ const PAGE = `
   .row { font-size:12px; color:#8b949e; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap; }
   .badge { background:#21262d; border-radius:999px; padding:1px 8px; font-size:11px; }
   .score { color:#3fb950; font-weight:700; }
+  .badge.size { color:#79c0ff; }
+  .badge.cond-new { color:#3fb950; }
+  .badge.cond-like-new { color:#d29922; }
+  .badge.cond-used { color:#8b949e; }
   .reasons { font-size:12px; color:#d29922; margin-top:4px; }
   .proxies a { color:#58a6ff; font-size:12px; margin-right:8px; text-decoration:none; }
   .empty { color:#8b949e; padding:32px 0; text-align:center; }
@@ -56,6 +67,7 @@ const PAGE = `
 <script>
   const markets = ${JSON.stringify(ALL_MARKETS.map((m) => ({ id: m, label: MARKET_LABEL[m] })))};
   const brands = ${JSON.stringify(BRANDS.map((b) => ({ key: b.key, name: b.name })))};
+  const conditionLabels = ${JSON.stringify(CONDITION_LABEL)};
   for (const m of markets) {
     document.getElementById("market").insertAdjacentHTML("beforeend", \`<option value="\${m.id}">\${m.label}</option>\`);
   }
@@ -89,6 +101,8 @@ const PAGE = `
         <div class="title"><a href="\${d.url}" target="_blank">\${escapeHtml(d.title)}</a></div>
         <div class="row">
           <span class="badge">\${d.marketLabel}</span>
+          \${d.size ? \`<span class="badge size">\${d.size}</span>\` : ""}
+          \${d.condition ? \`<span class="badge cond cond-\${d.condition}">\${conditionLabels[d.condition] || d.condition}</span>\` : ""}
           <span>\${d.priceLabel}</span>
           <span class="score">score \${d.score}</span>
           \${d.endsInMin != null && d.endsInMin > 0 ? \`<span>ends in \${fmtDur(d.endsInMin)}</span>\` : ""}
@@ -163,6 +177,11 @@ export function startDashboard(
           d.listing.imageUrl && isAllowedImageUrl(d.listing.imageUrl)
             ? `/api/thumb?u=${encodeURIComponent(d.listing.imageUrl)}`
             : null,
+        size: d.listing.size ?? null,
+        condition:
+          d.listing.condition ??
+          (d.listing.title ? extractCondition(d.listing.title) : undefined) ??
+          null,
         marketLabel: MARKET_LABEL[d.listing.market],
         priceLabel:
           d.listing.currency === "JPY"
