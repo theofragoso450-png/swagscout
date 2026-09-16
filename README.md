@@ -37,8 +37,12 @@ Requirements: **Node 23+** (uses the built-in `node:sqlite` — no native compil
 
 1. Create an app at <https://discord.com/developers> → Bot → Reset Token → put it in `DISCORD_TOKEN`.
 2. Invite the bot with the `bot` + `applications.commands` scopes (no special permissions needed beyond sending messages in the target channels).
-3. In Discord: `/watch brand:raf` in the channel that should receive Raf Simons alerts, `/watch brand:all` for everything, optionally with `min_score`.
+3. In Discord: `/watch brand:raf` in the channel that should receive Raf Simons alerts, `/watch brand:all` for everything, optionally with `min_score` and `size`.
 4. Commands: `/watch` `/unwatch` `/brands` `/status` `/deals`.
+
+**Filters:** a subscription can combine `brand`, `min_score`, and `size`. `size` is an exact, case-insensitive match against the size extracted at ingest (`M`, `28`, `W34`, …) — listings without a size never match a size-filtered channel. Re-running `/watch` for the same brand updates that subscription; omitting `size` clears the filter. Example: `/watch brand:yohji min_score:50 size:M` alerts only Yohji pieces in M scoring 50+.
+
+**`/deals` previews your channel's alerts:** it applies the same matching logic as alert routing (brand + min_score + size) to recent deals, so what it shows is exactly what that channel would be alerted about. Without subscriptions it falls back to all recent deals.
 
 Webhook-only mode also works: set `DISCORD_WEBHOOK_URL` instead of a token (alerts only, no commands).
 
