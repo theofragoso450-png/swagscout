@@ -116,10 +116,14 @@ export class Store {
       VALUES (@listingKey, @market, @marketId, @title, @brandKey, @priceUsd, @url, @reasons, @score, @foundAt)
     `);
     this.recentDealsStmt = this.db.prepare(
-      "SELECT * FROM deals ORDER BY foundAt DESC LIMIT ?",
+      `SELECT d.*, l.imageUrl AS imageUrl
+       FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
+       ORDER BY d.foundAt DESC LIMIT ?`,
     );
     this.recentDealsByBrandStmt = this.db.prepare(
-      "SELECT * FROM deals WHERE brandKey = ? ORDER BY foundAt DESC LIMIT ?",
+      `SELECT d.*, l.imageUrl AS imageUrl
+       FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
+       WHERE d.brandKey = ? ORDER BY d.foundAt DESC LIMIT ?`,
     );
   }
 
@@ -290,6 +294,7 @@ export class Store {
       reasons: string;
       score: number;
       foundAt: string;
+      imageUrl: string | null;
     };
     const rows = (
       brand !== undefined
@@ -311,6 +316,7 @@ export class Store {
           priceUsd: r.priceUsd,
           url: r.url,
           foundAt: r.foundAt,
+          imageUrl: r.imageUrl ?? undefined,
         },
         proxy: proxyLinks({
           id: r.marketId,
