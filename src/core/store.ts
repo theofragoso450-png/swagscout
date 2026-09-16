@@ -30,6 +30,8 @@ export interface Subscription {
   watch: string;
   /** minimum deal score to alert in this channel */
   minScore: number;
+  /** optional exact-size filter (case-insensitive); null = all sizes */
+  size?: string | null;
 }
 
 /**
@@ -66,6 +68,14 @@ export class Store {
     const cols = this.db.prepare("PRAGMA table_info(listings)").all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === "condition")) {
       this.db.exec("ALTER TABLE listings ADD COLUMN condition TEXT");
+    }
+    // subscriptions.size added with the per-channel size filter; existing rows
+    // keep NULL (all sizes).
+    const subCols = this.db
+      .prepare("PRAGMA table_info(subscriptions)")
+      .all() as Array<{ name: string }>;
+    if (!subCols.some((c) => c.name === "size")) {
+      this.db.exec("ALTER TABLE subscriptions ADD COLUMN size TEXT");
     }
 
     this.hasStmt = this.db.prepare(
@@ -107,9 +117,11 @@ export class Store {
        ORDER BY priceUsd DESC LIMIT 200`,
     );
     this.addSubStmt = this.db.prepare(`
-      INSERT INTO subscriptions (guildId, channelId, watch, minScore)
-      VALUES (@guildId, @channelId, @watch, @minScore)
-      ON CONFLICT(guildId, channelId, watch) DO UPDATE SET minScore = excluded.minScore
+      INSERT INTO subscriptions (guildId, channelId, watch, minScore, size)
+      VALUES (@guildId, @channelId, @watch, @minScore, @size)
+      ON CONFLICT(guildId, channelId, watch) DO UPDATE SET
+        minScore = excluded.minScore,
+        size = excluded.size
     `);
     this.deleteSubStmt = this.db.prepare(
       "DELETE FROM subscriptions WHERE guildId = ? AND channelId = ? AND watch = ?",
@@ -165,6 +177,7 @@ export class Store {
         channelId TEXT NOT NULL,
         watch TEXT NOT NULL,
         minScore REAL NOT NULL DEFAULT 0,
+        size TEXT,
         PRIMARY KEY (guildId, channelId, watch)
       );
 
@@ -254,6 +267,7 @@ export class Store {
       channelId: s.channelId,
       watch: s.watch,
       minScore: s.minScore,
+      size: s.size ?? null,
     });
   }
 

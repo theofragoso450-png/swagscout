@@ -109,6 +109,20 @@ describe("Store", () => {
     store.close();
   });
 
+  it("persists and clears a subscription size filter (roundtrip)", () => {
+    const store = new Store(dbPath);
+    store.addSubscription({ guildId: "g1", channelId: "c1", watch: "raf", minScore: 10, size: "M" });
+    store.addSubscription({ guildId: "g1", channelId: "c1", watch: "cdg", minScore: 0 });
+    let subs = store.listSubscriptions();
+    expect(subs.find((s) => s.watch === "raf")!.size).toBe("M");
+    expect(subs.find((s) => s.watch === "cdg")!.size ?? null).toBeNull();
+    // re-watch without size clears the filter (same row, upsert)
+    store.addSubscription({ guildId: "g1", channelId: "c1", watch: "raf", minScore: 10 });
+    subs = store.listSubscriptions();
+    expect(subs.find((s) => s.watch === "raf")!.size ?? null).toBeNull();
+    store.close();
+  });
+
   it("stores meta values", () => {
     const store = new Store(dbPath);
     store.setMeta("lastRun", "123");
