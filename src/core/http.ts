@@ -3,9 +3,11 @@ import { request, Agent } from "undici";
 /**
  * Shared dispatcher: undici v8 negotiates HTTP/2 by default over TLS; this
  * scraper's behavior was built and tested against HTTP/1.1 (timeouts,
- * redirect handling, per-host politeness), so pin h1 explicitly.
+ * redirect handling, per-host politeness), so pin h1 explicitly. Every
+ * undici request() in the codebase must pass this — including call sites
+ * outside this module (e.g. markets/ebay.ts's OAuth token POST).
  */
-const dispatcher = new Agent({ allowH2: false });
+export const dispatcher = new Agent({ allowH2: false });
 
 const MAX_REDIRECTS = 5;
 
