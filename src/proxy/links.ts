@@ -19,7 +19,10 @@ export function proxyLinks(listing: Listing): ProxyLinks {
     return links;
   }
 
-  // Mercari & Rakuma: proxy services key off the numeric listing id.
+  // Mercari & Rakuma: proxy services key off the numeric listing id. Only
+  // alphanumeric ids are interpolated — marketplace-controlled ids that carry
+  // URL-breaking characters must not reach proxy URL templates.
+  if (!/^[a-zA-Z0-9]+$/.test(listing.id)) return links;
   if (listing.market === "mercari") {
     links.buyee = `https://buyee.jp/mercari/purchase/${listing.id}`;
     links.zenmarket = `https://zenmarket.jp/en/mercari/product.aspx?code=${listing.id}`;
