@@ -27,9 +27,10 @@ export interface FetchOptions {
 }
 
 export class RateLimiter {
-  private queue: Array<() => void> = [];
   private tokens: number;
   private lastRefill = Date.now();
+  /** Serializes acquire: only one waiter at a time runs refill+check+consume. */
+  private chain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly capacity: number, // max burst
@@ -45,16 +46,29 @@ export class RateLimiter {
     this.lastRefill = now;
   }
 
-  async acquire(): Promise<void> {
-    this.refill();
-    if (this.tokens >= 1) {
-      this.tokens -= 1;
-      return;
+  /** FIFO, mutually exclusive: each waiter sees the tokens left by the previous.
+   *  (The naive version let parallel waiters share one refill snapshot — the
+   *  whole bucket's refill could be double-spent by concurrent acquires.) */
+  acquire(): Promise<void> {
+    const run = this.chain.then(() => this.acquireLocked());
+    this.chain = run.catch(() => {}); // chain survives any waiter failure
+    return run;
+  }
+
+  private async acquireLocked(): Promise<void> {
+    for (;;) {
+      this.refill();
+      if (this.tokens >= 1) {
+        this.tokens -= 1;
+        return;
+      }
+      // Wait exactly the token deficit, re-checking at most every second so a
+      // tiny refill rate still re-evaluates (and a zero rate waits forever —
+      // correct: no token can ever appear).
+      const deficitMs =
+        this.refillPerSec > 0 ? ((1 - this.tokens) / this.refillPerSec) * 1000 : Infinity;
+      await sleep(Math.max(Math.min(deficitMs, 1_000), 10));
     }
-    const waitMs = ((1 - this.tokens) / this.refillPerSec) * 1000;
-    await new Promise((r) => setTimeout(r, Math.max(waitMs, 10)));
-    this.refill();
-    this.tokens = Math.max(0, this.tokens - 1);
   }
 }
 
