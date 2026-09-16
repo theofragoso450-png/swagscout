@@ -57,9 +57,10 @@ export function extractSize(title: string): string | undefined {
  */
 export function extractCondition(title: string): string | undefined {
   const t = title.toLowerCase();
-  if (/新品同様|未使用品?|deadstock/.test(t)) return "new";
+  if (/新品同様|未使用品?|deadstock|\bun-?used\b|never\s+(?:been\s+)?used/.test(t)) return "new";
   if (/美品|良品|near mint|excellent/.test(t)) return "like-new";
-  if (/中古|used|pre-?owned/.test(t)) return "used";
+  // "un-used"/"unused" must not degrade to "used" — hence the lookbehind.
+  if (/(?<!un)\bused\b|中古|pre-?owned/.test(t)) return "used";
   return undefined;
 }
 

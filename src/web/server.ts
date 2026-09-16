@@ -101,7 +101,7 @@ const PAGE = `
         <div class="title"><a href="\${d.url}" target="_blank">\${escapeHtml(d.title)}</a></div>
         <div class="row">
           <span class="badge">\${d.marketLabel}</span>
-          \${d.size ? \`<span class="badge size">\${d.size}</span>\` : ""}
+          \${d.size ? \`<span class="badge size">\${escapeHtml(d.size)}</span>\` : ""}
           \${d.condition ? \`<span class="badge cond cond-\${d.condition}">\${conditionLabels[d.condition] || d.condition}</span>\` : ""}
           <span>\${d.priceLabel}</span>
           <span class="score">score \${d.score}</span>

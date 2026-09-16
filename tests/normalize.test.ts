@@ -161,6 +161,13 @@ describe("extractCondition", () => {
     expect(extractCondition("")).toBeUndefined();
   });
 
+  it("does not read 'unused' as used (lookbehind)", () => {
+    expect(extractCondition("UNUSED Raf Simons jacket")).toBe("new");
+    expect(extractCondition("never used once Yohji shirt")).toBe("new");
+    expect(extractCondition("un-used CDG coat")).toBe("new");
+    expect(extractCondition("genuinely used Rick Owens tee")).toBe("used");
+  });
+
   it("extractCondition flows into normalized listings from the raw title", () => {
     const l = normalizeListing({ ...base, id: "c1", title: "美品 ヨウジヤマモト シャツ", price: 1000 });
     expect(l.condition).toBe("like-new");
