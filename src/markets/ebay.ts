@@ -1,4 +1,5 @@
 import { request } from "undici";
+import { dispatcher } from "../core/http.js";
 import type { Listing, MarketId } from "../types.js";
 import { normalizeListing } from "../core/normalize.js";
 import type { MarketAdapter } from "./types.js";
@@ -48,6 +49,7 @@ export class EbayAdapter implements MarketAdapter {
     const basic = Buffer.from(`${this.appId}:${this.certId}`).toString("base64");
     const res = await request("https://api.ebay.com/identity/v1/oauth2/token", {
       method: "POST",
+      dispatcher,
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Authorization: `Basic ${basic}`,
