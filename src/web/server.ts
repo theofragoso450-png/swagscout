@@ -13,6 +13,20 @@ const CONDITION_LABEL: Record<string, string> = {
   used: "Used",
 };
 
+/**
+ * Marketplace-controlled URLs must never reach the page with an executable
+ * scheme; non-http(s) or unparseable values are nulled and render inert ("#").
+ */
+function safeUrl(u: string | null | undefined): string | null {
+  if (!u) return null;
+  try {
+    const parsed = new URL(u);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 const PAGE = `
 <!doctype html>
 <html>
@@ -92,17 +106,27 @@ const PAGE = `
     else feed.innerHTML = data.deals.map(render).join("");
     document.getElementById("stats").textContent = data.stats;
   }
+  // Marketplace-controlled URLs (listing + proxy links) must never carry an
+  // executable scheme; anything not resolving to http(s) renders inert ("#").
+  function safeUrl(u) {
+    if (!u) return "#";
+    try {
+      const parsed = new URL(u, location.origin);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "#";
+      return parsed.href;
+    } catch { return "#"; }
+  }
   function render(d) {
     const reasons = (d.reasons||[]).map(r => "• " + r.detail).join(" &nbsp; ");
-    const proxies = Object.entries(d.proxy||{}).map(([k,v]) => \`<a href="\${v}" target="_blank">\${k[0].toUpperCase()+k.slice(1)}</a>\`).join("");
+    const proxies = Object.entries(d.proxy||{}).map(([k,v]) => \`<a href="\${escapeHtml(safeUrl(v))}" target="_blank">\${escapeHtml(k[0].toUpperCase()+k.slice(1))}</a>\`).join("");
     return \`<div class="deal">
-      \${d.imageUrl ? \`<img src="\${d.imageUrl}" loading="lazy" onerror="this.onerror=null;this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' >"}
+      \${d.imageUrl ? \`<img src="\${escapeHtml(safeUrl(d.imageUrl))}" loading="lazy" onerror="this.onerror=null;this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' >"}
       <div class="meta">
-        <div class="title"><a href="\${d.url}" target="_blank">\${escapeHtml(d.title)}</a></div>
+        <div class="title"><a href="\${escapeHtml(safeUrl(d.url))}" target="_blank">\${escapeHtml(d.title)}</a></div>
         <div class="row">
-          <span class="badge">\${d.marketLabel}</span>
+          <span class="badge">\${escapeHtml(d.marketLabel)}</span>
           \${d.size ? \`<span class="badge size">\${escapeHtml(d.size)}</span>\` : ""}
-          \${d.condition ? \`<span class="badge cond cond-\${d.condition}">\${conditionLabels[d.condition] || d.condition}</span>\` : ""}
+          \${d.condition ? \`<span class="badge cond cond-\${escapeHtml(d.condition)}">\${escapeHtml(conditionLabels[d.condition] || d.condition)}</span>\` : ""}
           <span>\${d.priceLabel}</span>
           <span class="score">score \${d.score}</span>
           \${d.endsInMin != null && d.endsInMin > 0 ? \`<span>ends in \${fmtDur(d.endsInMin)}</span>\` : ""}
@@ -134,7 +158,8 @@ const PAGE = `
 `;
 
 export interface DashboardServer {
-  start(): Promise<void>;
+  /** Binds the server; resolves with the actual port (useful when port is 0). */
+  start(): Promise<number>;
   stop(): Promise<void>;
 }
 
@@ -172,7 +197,7 @@ export function startDashboard(
     return {
       deals: deals.slice(0, 80).map((d) => ({
         title: d.listing.title,
-        url: d.listing.url,
+        url: safeUrl(d.listing.url),
         imageUrl:
           d.listing.imageUrl && isAllowedImageUrl(d.listing.imageUrl)
             ? `/api/thumb?u=${encodeURIComponent(d.listing.imageUrl)}`
@@ -228,6 +253,8 @@ export function startDashboard(
   return {
     async start() {
       await app.listen({ port, host: "0.0.0.0" });
+      const addr = app.server.address();
+      return typeof addr === "object" && addr ? addr.port : port;
     },
     async stop() {
       await app.close();
