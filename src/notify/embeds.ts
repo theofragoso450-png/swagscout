@@ -1,11 +1,13 @@
 import type { Deal, Listing } from "../types.js";
 import { MARKET_LABEL, MARKET_FLAG } from "../types.js";
 import { getBrand } from "../config/brands.js";
+import { safeUrl } from "../core/safe-url.js";
 
 /** APIEmbed-compatible subset we build manually (no discord.js dependency here). */
 export interface EmbedPayload {
   title: string;
-  url: string;
+  /** Optional: omitted when the listing URL fails the scheme allowlist. */
+  url?: string;
   description?: string;
   color: number;
   fields: Array<{ name: string; value: string; inline?: boolean }>;
@@ -26,6 +28,19 @@ function colorFor(score: number): number {
 
 function fmtUsd(n: number): string {
   return `$${n.toFixed(2).replace(/\.00$/, "")}`;
+}
+
+const FIELD_MAX = 1024; // Discord embed field value cap
+
+/** Marketplace-controlled text must not render as markdown inside fields. */
+function esc(s: string): string {
+  return s.replace(/[\\`*_~\[\]()<>|\n\r]/g, (c) => (c === "\n" || c === "\r" ? " " : `\\${c}`));
+}
+
+/** Escape, then cap: overflow is dropped, never left unescaped. */
+function bounded(s: string, max: number): string {
+  const escaped = esc(s);
+  return escaped.length <= max ? escaped : escaped.slice(0, max - 1) + "…";
 }
 
 export function buildDealEmbed(deal: Deal): EmbedPayload {
@@ -49,8 +64,8 @@ export function buildDealEmbed(deal: Deal): EmbedPayload {
     { name: "Price", value: `${flag} ${priceLine}`, inline: true },
     { name: "Market", value: MARKET_LABEL[l.market], inline: true },
   ];
-  if (brandName) fields.push({ name: "Brand", value: brandName, inline: true });
-  if (l.size) fields.push({ name: "Size", value: l.size, inline: true });
+  if (brandName) fields.push({ name: "Brand", value: bounded(brandName, FIELD_MAX), inline: true });
+  if (l.size) fields.push({ name: "Size", value: bounded(l.size, FIELD_MAX), inline: true });
   if (l.endsAt) {
     const ts = Math.floor(Date.parse(l.endsAt) / 1000);
     if (Number.isFinite(ts) && ts > Date.now() / 1000) {
@@ -60,12 +75,13 @@ export function buildDealEmbed(deal: Deal): EmbedPayload {
   fields.push({ name: "Why it's a deal", value: reasons.slice(0, 1000) });
   fields.push({ name: "Proxy buy", value: proxyValue });
 
+  const thumb = safeUrl(l.imageUrl);
   return {
     title: l.title.slice(0, 250),
-    url: l.url,
+    url: safeUrl(l.url) ?? undefined,
     color: colorFor(deal.score),
     fields,
-    thumbnail: l.imageUrl ? { url: l.imageUrl } : undefined,
+    thumbnail: thumb ? { url: thumb } : undefined,
     footer: { text: `SwagScout • score ${deal.score}` },
     timestamp: l.foundAt,
   };
