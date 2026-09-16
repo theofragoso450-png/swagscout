@@ -70,6 +70,7 @@ const PAGE = `
 <div class="bar">
   <select id="market"><option value="">All markets</option></select>
   <select id="brand"><option value="">All brands</option></select>
+  <select id="size"><option value="">All sizes</option></select>
   <select id="sort">
     <option value="found">Newest</option>
     <option value="score">Best score</option>
@@ -88,15 +89,29 @@ const PAGE = `
   for (const b of brands) {
     document.getElementById("brand").insertAdjacentHTML("beforeend", \`<option value="\${b.key}">\${b.name}</option>\`);
   }
+  const sizeSel = document.getElementById("size");
+  async function rebuildSizeOptions() {
+    const keep = sizeSel.value;
+    const res = await fetch("/api/sizes");
+    const sizes = await res.json();
+    sizeSel.innerHTML = '<option value="">All sizes</option>' +
+      sizes.map((s) => \`<option value="\${escapeHtml(s)}">\${escapeHtml(s)}</option>\`).join("");
+    if ([...sizeSel.options].some((o) => o.value === keep)) sizeSel.value = keep;
+    else sizeSel.value = "";
+  }
+  rebuildSizeOptions();
+  setInterval(rebuildSizeOptions, 60000);
   let timer;
   async function refresh() {
     const p = new URLSearchParams();
     const m = document.getElementById("market").value;
     const b = document.getElementById("brand").value;
+    const z = sizeSel.value;
     const s = document.getElementById("sort").value;
     const q = document.getElementById("q").value;
     if (m) p.set("market", m);
     if (b) p.set("brand", b);
+    if (z) p.set("size", z);
     if (s) p.set("sort", s);
     if (q) p.set("q", q);
     const res = await fetch("/api/deals?" + p.toString());
@@ -144,7 +159,7 @@ const PAGE = `
   function escapeHtml(s) {
     return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
-  for (const id of ["market","brand","sort"]) document.getElementById(id).addEventListener("change", refresh);
+  for (const id of ["market", "brand", "size", "sort"]) document.getElementById(id).addEventListener("change", refresh);
   let debounceTimer;
   document.getElementById("q").addEventListener("input", () => {
     clearTimeout(debounceTimer);
@@ -178,17 +193,24 @@ export function startDashboard(
   interface DealsQuery {
     market?: string;
     brand?: string;
+    size?: string;
     sort?: string;
     q?: string;
   }
 
   app.get<{ Querystring: DealsQuery }>("/api/deals", async (req) => {
-    const { market, brand, sort, q } = req.query;
+    const { market, brand, size, sort, q } = req.query;
     // NB: "all" is a wildcard inside recentDeals — adding it alongside a
     // brand key would make the brand filter a no-op. The third arg scopes
     // the SQL to the brand so niche brands aren't starved by newer deals.
     let deals: Deal[] = store.recentDeals(brand ? [brand] : ["all"], 200, brand);
 
+    // Bot-matching semantics: exact, case-insensitive; listings without a
+    // size never match a size-filtered view (see notify/matching.ts).
+    if (size) {
+      const want = size.toLowerCase();
+      deals = deals.filter((d) => (d.listing.size ?? "").toLowerCase() === want);
+    }
     if (market) deals = deals.filter((d) => d.listing.market === market);
     if (q) deals = deals.filter((d) => d.listing.title.toLowerCase().includes(q.toLowerCase()));
     if (sort === "score") deals = [...deals].sort((a, b) => b.score - a.score);
@@ -221,6 +243,14 @@ export function startDashboard(
       })),
       stats: getStats(),
     };
+  });
+
+  app.get("/api/sizes", async () => {
+    const rows = store.recentListings(24 * 14) as Array<{ size: string | null }>;
+    const sizes = [...new Set(rows.map((r) => r.size).filter((s): s is string => !!s))].sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+    );
+    return sizes;
   });
 
   app.get("/api/health", async () => {
