@@ -13,6 +13,7 @@ import { BRANDS } from "../config/brands.js";
 import type { Store } from "../core/store.js";
 import { logger } from "../logger.js";
 import { buildDealEmbeds } from "./embeds.js";
+import { dealMatchesSubscription } from "./matching.js";
 
 export interface NotifierEnv {
   token?: string;
@@ -97,6 +98,8 @@ export class DiscordNotifier {
           .setDescription("Subscribe this channel to deal alerts"),
       ).addNumberOption((o) =>
         o.setName("min_score").setDescription("Minimum deal score 0-100 (default 0)").setRequired(false),
+      ).addStringOption((o) =>
+        o.setName("size").setDescription("Only alert listings in this size, e.g. M or 28 (default: any)").setRequired(false),
       ),
       watchOption(
         new SlashCommandBuilder().setName("unwatch").setDescription("Remove a watch from this channel"),
@@ -138,6 +141,7 @@ export class DiscordNotifier {
   private async cmdWatch(i: ChatInputCommandInteraction): Promise<void> {
     const watch = i.options.getString("brand", true).toLowerCase();
     const minScore = i.options.getNumber("min_score") ?? 0;
+    const size = i.options.getString("size")?.trim() || null;
     if (!i.guildId) {
       await i.reply({ content: "Use /watch in a server channel.", ephemeral: true });
       return;
@@ -146,12 +150,13 @@ export class DiscordNotifier {
       await i.reply({ content: "This channel isn't allow-listed via DISCORD_ALLOWED_CHANNELS.", ephemeral: true });
       return;
     }
-    this.store.addSubscription({ guildId: i.guildId, channelId: i.channelId, watch, minScore });
+    this.store.addSubscription({ guildId: i.guildId, channelId: i.channelId, watch, minScore, size });
+    const sizeNote = size ? ` in size **${size}**` : "";
     await i.reply({
       content:
         watch === "all"
-          ? "✅ Watching **everything** in this channel."
-          : `✅ Watching **${watch}** here (min score ${minScore}).`,
+          ? `✅ Watching **everything**${sizeNote} in this channel.`
+          : `✅ Watching **${watch}**${sizeNote} here (min score ${minScore}).`,
       ephemeral: true,
     });
   }
@@ -192,8 +197,10 @@ export class DiscordNotifier {
   private async cmdDeals(i: ChatInputCommandInteraction): Promise<void> {
     const limit = Math.min(i.options.getInteger("limit") ?? 5, 10);
     const subs = this.store.listSubscriptions().filter((s) => s.channelId === i.channelId);
-    const watches = subs.length > 0 ? subs.map((s) => s.watch) : ["all"];
-    const deals = this.store.recentDeals(watches, limit);
+    const pool = this.store.recentDeals(["all"], 50);
+    const deals = pool
+      .filter((d) => subs.length === 0 || subs.some((s) => dealMatchesSubscription(d, s)))
+      .slice(0, limit);
     if (deals.length === 0) {
       await i.reply({ content: "No recent deals recorded.", ephemeral: true });
       return;
@@ -223,12 +230,10 @@ export class DiscordNotifier {
   }
 
   private async routeDeal(deal: Deal): Promise<void> {
-    const watch = deal.listing.brandKey ?? "all";
-    const subs = this.store.subscriptionsFor(watch);
+    const subs = this.store.listSubscriptions().filter((s) => dealMatchesSubscription(deal, s));
     const embeds = buildDealEmbeds([deal]);
 
     for (const sub of subs) {
-      if (deal.score < sub.minScore) continue;
       if (!this.channelAllowed(sub.channelId)) continue;
       try {
         const channel = await this.client!.channels.fetch(sub.channelId);
