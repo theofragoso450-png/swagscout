@@ -9,6 +9,14 @@ import { request, Agent } from "undici";
  */
 export const dispatcher = new Agent({ allowH2: false });
 
+/** Close the shared dispatcher (call on shutdown). Idempotent. */
+let dispatcherClosed = false;
+export async function closeSharedDispatcher(): Promise<void> {
+  if (dispatcherClosed) return;
+  dispatcherClosed = true;
+  await dispatcher.close();
+}
+
 const MAX_REDIRECTS = 5;
 
 export interface FetchOptions {

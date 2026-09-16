@@ -1,7 +1,8 @@
 import { loadEnv, ensureDbDir } from "./config/env.js";
 import { logger } from "./logger.js";
 import { Store } from "./core/store.js";
-import { HttpClient } from "./core/http.js";
+import { HttpClient, closeSharedDispatcher } from "./core/http.js";
+import { runShutdown, type Signal } from "./core/shutdown.js";
 import { Poller } from "./core/poller.js";
 import { DiscordNotifier } from "./notify/discord.js";
 import { startDashboard } from "./web/server.js";
@@ -73,17 +74,22 @@ async function main(): Promise<void> {
   await notifier.start();
   await dashboard.start();
 
-  const shutdown = async (signal: string) => {
-    logger.info({ signal }, "shutting down");
-    poller.stop();
-    await notifier.stop();
-    await dashboard.stop();
-    await closeSharedBrowser().catch(() => {});
-    store.close();
+  const shutdown = async (signal: Signal) => {
+    await runShutdown(
+      {
+        stopPolling: () => poller.stop(),
+        closeNotifier: () => notifier.stop(),
+        closeDashboard: () => dashboard.stop(),
+        closeBrowser: () => closeSharedBrowser().catch(() => {}),
+        closeDispatcher: closeSharedDispatcher,
+        closeStore: () => store.close(),
+      },
+      signal,
+    );
     process.exit(0);
   };
-  process.on("SIGINT", () => void shutdown("SIGINT"));
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", (sig) => void shutdown(sig as Signal));
+  process.on("SIGTERM", (sig) => void shutdown(sig as Signal));
 
   poller.start();
   logger.info({ port: env.port, db: env.dbPath }, "swagscout running");
