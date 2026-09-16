@@ -4,6 +4,7 @@ import { ALL_MARKETS, MARKET_LABEL } from "../types.js";
 import { BRANDS } from "../config/brands.js";
 import { THRESHOLD_RULES } from "../config/rules.js";
 import type { Deal } from "../types.js";
+import { fetchThumb, isAllowedImageUrl } from "./thumbs.js";
 
 const PAGE = `
 <!doctype html>
@@ -83,7 +84,7 @@ const PAGE = `
     const reasons = (d.reasons||[]).map(r => "• " + r.detail).join(" &nbsp; ");
     const proxies = Object.entries(d.proxy||{}).map(([k,v]) => \`<a href="\${v}" target="_blank">\${k[0].toUpperCase()+k.slice(1)}</a>\`).join("");
     return \`<div class="deal">
-      \${d.imageUrl ? \`<img src="\${d.imageUrl}" loading="lazy">\` : "<img src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' >"}
+      \${d.imageUrl ? \`<img src="\${d.imageUrl}" loading="lazy" onerror="this.onerror=null;this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' >"}
       <div class="meta">
         <div class="title"><a href="\${d.url}" target="_blank">\${escapeHtml(d.title)}</a></div>
         <div class="row">
@@ -158,7 +159,10 @@ export function startDashboard(
       deals: deals.slice(0, 80).map((d) => ({
         title: d.listing.title,
         url: d.listing.url,
-        imageUrl: d.listing.imageUrl,
+        imageUrl:
+          d.listing.imageUrl && isAllowedImageUrl(d.listing.imageUrl)
+            ? `/api/thumb?u=${encodeURIComponent(d.listing.imageUrl)}`
+            : null,
         marketLabel: MARKET_LABEL[d.listing.market],
         priceLabel:
           d.listing.currency === "JPY"
@@ -182,6 +186,24 @@ export function startDashboard(
       rules: THRESHOLD_RULES.length,
       brands: BRANDS.length,
     };
+  });
+
+  // Local thumbnail proxy: the browser never talks to market CDNs directly;
+  // this endpoint fetches whitelisted https image URLs server-side.
+  app.get<{ Querystring: { u?: string } }>("/api/thumb", async (req, reply) => {
+    const { u } = req.query;
+    if (!u || !isAllowedImageUrl(u)) {
+      return reply.code(400).send({ error: "bad image url" });
+    }
+    try {
+      const thumb = await fetchThumb(u);
+      return reply
+        .header("content-type", thumb.contentType)
+        .header("cache-control", "public, max-age=86400")
+        .send(thumb.body);
+    } catch {
+      return reply.code(502).send({ error: "thumb fetch failed" });
+    }
   });
 
   return {
