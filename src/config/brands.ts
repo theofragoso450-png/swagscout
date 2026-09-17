@@ -124,6 +124,9 @@ export const BRANDS: Brand[] = [
     key: "kapital",
     name: "Kapital",
     aliases: ["kapital", "kaptain sunshine", "capitar"],
+    // "CAPITAL" is an ordinary English word (outdoor-gear titles like
+    // "MARMOT CAPITAL") — the fashion brand is never spelled that way.
+    negativeJpAliases: ["capital"],
     jpAliases: ["カピタル", "KAPITAL"],
     searchTerms: ["KAPITAL", "カピタル"],
   },
@@ -352,7 +355,138 @@ export function matchBrand(title: string): { brandKey: string; matched: string }
     if (brand?.negativeJpAliases?.some((n) => t.includes(n.toLowerCase()))) continue;
     return { brandKey: entry.brandKey, matched: entry.alias };
   }
-  return undefined;
+  // Exact match failed — badly-listed items (misspelled brands) are where
+  // some of the best deals hide, so fall back to typo-tolerant matching.
+  return matchBrandFuzzy(t);
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy fallback (runs only after the exact substring pass failed).
+//
+// Design constraints, learned from the live data:
+//  - compare whole WORD WINDOWS (1-3 consecutive ASCII-letter words), never
+//    raw substrings — a fuzzy "cdg" inside "cdgaf" or inside a model code
+//    would be garbage
+//  - window tokens with digits or non-latin script are skipped: model codes
+//    (F34246, IM21-…), sizes, and Japanese titles stay out of scope
+//  - edit distance thresholds scale with alias length (1 for short aliases,
+//    up to 3 for long ones) so "capitol" can never become "kapital"
+//  - aliases under 6 chars stay exact-only: at that length a distance-1 edit
+//    collides with ordinary words ("Ebisu" the place, "Yebisu" the beer —
+//    both distance-1 from evisu; both false-positive in the live DB)
+//  - space/punctuation-stripped comparison catches concatenated brand names
+//    ("yohjiyamamoto", "issey miyake") — a very common listing style on JP
+//    markets
+//  - the curated homonym guards (negativeJpAliases) still apply afterwards
+// ---------------------------------------------------------------------------
+
+/** NFD accent folding: garçons -> garcons, é -> e, etc. */
+function foldAscii(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+const FUZZY_WORD = /^[a-z][a-z'’-]+$/;
+const FUZZY_MIN_ALIAS = 5;
+
+function fuzzyThreshold(aliasLen: number): number {
+  if (aliasLen <= 7) return 1;
+  if (aliasLen <= 11) return 2;
+  return 3;
+}
+
+/** Damerau-Levenshtein distance, bailing out once the result must exceed `max`. */
+export function boundedDamerau(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (m === 0 || n === 0) return Math.max(m, n) <= max ? Math.max(m, n) : max + 1;
+  let prevPrev: number[] | null = null;
+  let prev: number[] = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur: number[] = [i];
+    let rowMin = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        v = Math.min(v, prevPrev![j - 2]! + 1);
+      }
+      cur[j] = v;
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > max) return max + 1; // whole row already too far — bail
+    prevPrev = prev;
+    prev = cur;
+  }
+  return prev[n]! <= max ? prev[n]! : max + 1;
+}
+
+function matchBrandFuzzy(t: string): { brandKey: string; matched: string } | undefined {
+  // Keep ALL ascii-letter words (even short ones like "des"/"for") —
+  // dropping them would destroy multi-word windows ("comme des garcuns").
+  // Short windows simply never match, because every fuzzy-compared alias
+  // is >= FUZZY_MIN_ALIAS chars.
+  const words = foldAscii(t)
+    .split(/\s+/)
+    .filter((w) => FUZZY_WORD.test(w));
+  if (words.length === 0) return undefined;
+
+  // Candidate windows: 1-3 consecutive words (all curated aliases of
+  // interest are <= 3 words; longer phrases are distinctive enough that
+  // the exact pass already catches them).
+  const windows: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    windows.push(words[i]!);
+    if (i + 1 < words.length) windows.push(`${words[i]} ${words[i + 1]}`);
+    if (i + 2 < words.length) windows.push(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
+  }
+
+  // Best fuzzy candidate per window; a window matching two DIFFERENT brands
+  // at the same distance is ambiguous and discarded entirely.
+  const perWindow = new Map<string, { brandKey: string; dist: number; aliasLen: number } | "ambiguous">();
+  for (const entry of ALIAS_INDEX) {
+    if (entry.isJp) continue; // romaji/EN aliases only for fuzzy
+    if (entry.alias.length < FUZZY_MIN_ALIAS) continue;
+    const max = fuzzyThreshold(entry.alias.length);
+    const compactAlias = entry.alias.replace(/['’ -]/g, "");
+    for (const win of windows) {
+      // Single-word fuzzy hits need aliases >= 6 chars: shorter aliases
+      // (evisu, marni, sacai…) collide with ordinary words at distance 1.
+      const isSingle = !win.includes(" ");
+      if (isSingle && entry.alias.length < 6) continue;
+      if (Math.abs(win.length - entry.alias.length) > max) continue;
+      let d = boundedDamerau(win, entry.alias, max);
+      if (isSingle) {
+        d = Math.min(d, boundedDamerau(win.replace(/['’-]/g, ""), compactAlias, max));
+      }
+      if (d > max) continue;
+      const prev = perWindow.get(win);
+      if (!prev) {
+        perWindow.set(win, { brandKey: entry.brandKey, dist: d, aliasLen: entry.alias.length });
+      } else if (prev !== "ambiguous") {
+        if (d < prev.dist || (d === prev.dist && entry.alias.length > prev.aliasLen)) {
+          perWindow.set(win, { brandKey: entry.brandKey, dist: d, aliasLen: entry.alias.length });
+        } else if (d === prev.dist && entry.brandKey !== prev.brandKey) {
+          perWindow.set(win, "ambiguous");
+        }
+      }
+    }
+  }
+
+  let best: { brandKey: string; matched: string; dist: number; aliasLen: number } | undefined;
+  for (const [win, hit] of perWindow) {
+    if (hit === "ambiguous") continue;
+    if (!best || hit.dist < best.dist || (hit.dist === best.dist && hit.aliasLen > best.aliasLen)) {
+      best = { brandKey: hit.brandKey, matched: win, dist: hit.dist, aliasLen: hit.aliasLen };
+    }
+  }
+  if (!best) return undefined;
+
+  // Homonym guard applies to fuzzy hits too ("suprme fishing reel").
+  const brand = BRAND_BY_KEY.get(best.brandKey);
+  if (brand?.negativeJpAliases?.some((n) => t.includes(n.toLowerCase()))) return undefined;
+  return { brandKey: best.brandKey, matched: best.matched };
 }
 
 export function getBrand(key: string): Brand | undefined {
