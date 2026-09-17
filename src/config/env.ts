@@ -39,10 +39,7 @@ export interface Env {
   pollSeconds: Record<MarketId, number>;
   compRoundUsd: number;
   rateLimitRpm: number;
-  jpTimezone: string;
-  displayCurrency: string;
   playwrightExecutablePath?: string;
-  logLevel: string;
   port: number;
   dbPath: string;
 }
@@ -64,10 +61,7 @@ export function loadEnv(): Env {
     },
     compRoundUsd: num("COMP_ROUND_USD", 50),
     rateLimitRpm: num("RATE_LIMIT_RPM", 12),
-    jpTimezone: opt("JP_TIMEZONE") ?? "Asia/Tokyo",
-    displayCurrency: (opt("DISPLAY_CURRENCY") ?? "USD").toUpperCase(),
     playwrightExecutablePath: opt("PLAYWRIGHT_EXECUTABLE_PATH"),
-    logLevel: opt("LOG_LEVEL") ?? "info",
     // Dashboard bind port (and the health endpoint Docker's healthcheck polls).
     port: num("PORT", 3080),
     dbPath: opt("DB_PATH") ?? path.join(process.cwd(), "data", "swagscout.db"),
