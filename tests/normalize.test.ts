@@ -77,13 +77,105 @@ describe("matchBrand", () => {
 });
 
 describe("extractSize", () => {
-  it("finds letter sizes", () => {
-    expect(extractSize("jacket size L")).toMatch(/L/i);
-    expect(extractSize("シャツ M")).toMatch(/M/i);
+  // — Branch 1: letter sizes (S/M/L/XS/XL/XXL), first match wins —
+  it("finds letter sizes and normalizes case", () => {
+    expect(extractSize("jacket size L")).toBe("L");
+    expect(extractSize("シャツ M")).toBe("M");
+    expect(extractSize("hoodie xl")).toBe("XL");
+    expect(extractSize("xxl hoodie")).toBe("XXL");
+    expect(extractSize("XS tee")).toBe("XS");
+    expect(extractSize("スニーカー SIZE M")).toBe("M");
   });
 
-  it("finds numeric sizes", () => {
-    expect(extractSize("undercover パーカー サイズ2")).toMatch(/2/);
+  // Branch 1 must not fire on letters inside words (\b…\b)
+  it("does not match letter fragments inside words", () => {
+    expect(extractSize("levi's 501 denim")).toBeUndefined();
+    expect(extractSize("sample sale item")).toBeUndefined();
+    expect(extractSize("charm necklace")).toBeUndefined();
+  });
+
+  // — Branch 2: single digit 1–7 (JP shirt sizes) —
+  it("finds single-digit sizes 1-7", () => {
+    expect(extractSize("undercover パーカー サイズ2")).toBe("2");
+    expect(extractSize("yohji shirt size 4")).toBe("4");
+    expect(extractSize("サイズ1")).toBe("1");
+    expect(extractSize("number 9 shirt")).toBeUndefined(); // 8-9 out of range
+  });
+
+  // — Branch 3: W## / waist ## —
+  it("finds waist sizes before generic digits", () => {
+    expect(extractSize("W32 denim")).toBe("W32");
+    expect(extractSize("pants w34 blue")).toBe("W34");
+    expect(extractSize("waist 34 slacks")).toBe("WAIST 34");
+  });
+
+  // — Branch 4: two-digit sizes (EU/JP numeric) —
+  it("finds two-digit sizes including zero-padded", () => {
+    expect(extractSize("size 38 dress")).toBe("38");
+    expect(extractSize("denim 06")).toBe("06");
+    expect(extractSize("size 00 jacket")).toBe("00");
+    expect(extractSize("コムデギャルソン 46")).toBe("46");
+  });
+
+  it("rejects one-, three-digit, and model-code numbers", () => {
+    expect(extractSize("adidas F34246 デトロイトランナー")).toBeUndefined();
+    expect(extractSize("model A1355")).toBeUndefined();
+    expect(extractSize("price 15000 yen")).toBeUndefined();
+  });
+
+  // DEFECT (red): the single-digit branch steals the fraction from real
+  // decimal sizes — "US 10.5" must be 10.5, not 5.
+  it("extracts decimal shoe sizes instead of the fraction digit", () => {
+    expect(extractSize("US 10.5 sneaker")).toBe("10.5");
+    expect(extractSize("sneaker 27.5")).toBe("27.5");
+  });
+
+  // New Era cap sizes run 6⅞-8+ with up to three decimals; US shoe
+  // halves (8.5) and JP half-digit fractions (9.5-13.5) are single-digit
+  // decimals — but bare 8/9 and "1.5ml" samples stay non-sizes.
+  it("extracts single-digit decimal sizes (6-9) only", () => {
+    expect(extractSize("supreme cap size 7.375")).toBe("7.375");
+    expect(extractSize("ビズビム サイズ:8.5" )).toBe("8.5");
+    expect(extractSize("レプリカ 1.5ml"))
+      .toBeUndefined();
+    expect(extractSize("case 8 only")).toBeUndefined();
+  });
+
+  // DEFECT (red): cm-suffixed shoe sizes appear throughout the live data
+  // ("Size25cm", "27cm", "40CM") but extract nothing today.
+  it("extracts cm-suffixed shoe sizes", () => {
+    expect(extractSize("Size25cm ローカット")).toBe("25CM");
+    expect(extractSize("スニーカー 27cm")).toBe("27CM");
+    expect(extractSize("40CM シルバー ネックレス")).toBe("40CM");
+  });
+
+  // Style codes must not become sizes (live junk: "M-1柄" → M,
+  // "IM21-F0636-67" → 67, "CI1303406" → 1).
+  it("rejects style-code and catalog fragments", () => {
+    expect(extractSize("M-1柄ジャケット")).toBeUndefined();
+    expect(extractSize("IM21-F0636-67")).toBeUndefined();
+    expect(extractSize("CI1303406 ナンバーナイン")).toBeUndefined();
+    expect(extractSize("UCY4101-2 パーカー")).toBeUndefined();
+  });
+
+  // Hyphenated letter sizes are real (live DB), unlike M-1 pattern names.
+  it("accepts hyphenated letter sizes", () => {
+    expect(extractSize("Size-XL hoodie")).toBe("XL");
+    expect(extractSize("L-XL キャップ")).toBe("L");
+  });
+
+  it("returns undefined for titles without any size signal", () => {
+    expect(extractSize("ヘルムートラング トリプルレイヤードチェーンネックレス シルバー")).toBeUndefined();
+    expect(extractSize("")).toBeUndefined();
+  });
+
+  // End-to-end: normalizeListing falls back to extractSize when the
+  // adapter passes no explicit size (all markets except Grailed).
+  it("feeds normalizeListing when the adapter passes no explicit size", () => {
+    const l = normalizeListing({ ...base, title: "ヨウジヤマモト シャツ サイズ3" });
+    expect(l.size).toBe("3");
+    const g = normalizeListing({ ...base, title: "whatever", size: "XL" });
+    expect(g.size).toBe("XL"); // explicit size wins
   });
 });
 
