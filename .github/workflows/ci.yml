@@ -4,9 +4,16 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Dispatch on a tag ref (e.g. v0.2.0) to build that tag's image and
-  # upload it as a downloadable artifact for attaching to the release.
+  # Dispatch with inputs.tag set (e.g. v0.2.0) to build that tag's image
+  # and upload it as a downloadable artifact for attaching to the release.
+  # Dispatching on the tag ref itself can't work for tags that predate
+  # this trigger — GitHub validates the workflow at the requested ref.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git ref to build (defaults to the dispatching ref)"
+        required: false
+        type: string
 
 jobs:
   ci:
@@ -31,6 +38,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Build the requested tag's tree when dispatched with inputs.tag.
+          ref: ${{ inputs.tag || github.ref }}
 
       # Plain build: at this image size (~20s of real work) the buildx + GHA
       # cache machinery costs ~35s in fixed overhead — measured slower warm
@@ -51,12 +61,12 @@ jobs:
       # Export + upload only on manual dispatch (PRs don't need image artifacts).
       - name: Export image
         if: github.event_name == 'workflow_dispatch'
-        run: docker save swagscout:ci | gzip > "swagscout-image-${{ github.ref_name }}.tar.gz"
+        run: docker save swagscout:ci | gzip > "swagscout-image-${{ inputs.tag || github.ref_name }}.tar.gz"
 
       - name: Upload image artifact
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: swagscout-image-${{ github.ref_name }}
+          name: swagscout-image-${{ inputs.tag || github.ref_name }}
           path: swagscout-image-*.tar.gz
           retention-days: 7
