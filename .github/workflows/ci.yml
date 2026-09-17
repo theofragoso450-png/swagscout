@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Dispatch on a tag ref (e.g. v0.2.0) to build that tag's image and
+  # upload it as a downloadable artifact for attaching to the release.
+  workflow_dispatch:
 
 jobs:
   ci:
@@ -44,3 +47,16 @@ jobs:
           if [ "$BUILD_SECONDS" -ge 90 ]; then
             echo "::warning::Docker build took ${BUILD_SECONDS}s (threshold 90s). Dependency layers are heavy enough that buildx layer caching (mode=max, see PRs #3/#5) is worth re-measuring before assuming a plain build is fastest."
           fi
+
+      # Export + upload only on manual dispatch (PRs don't need image artifacts).
+      - name: Export image
+        if: github.event_name == 'workflow_dispatch'
+        run: docker save swagscout:ci | gzip > "swagscout-image-${{ github.ref_name }}.tar.gz"
+
+      - name: Upload image artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: swagscout-image-${{ github.ref_name }}
+          path: swagscout-image-*.tar.gz
+          retention-days: 7
