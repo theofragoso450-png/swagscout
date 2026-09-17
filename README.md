@@ -28,6 +28,7 @@ Price-drop detection: re-seen listings that drop ≥3% re-alert with the old→n
 npm install
 cp .env.example .env        # fill in DISCORD_TOKEN (+ eBay keys if you have them)
 npm run smoke               # one live poll of every market — verify scrapers work
+npm run smoke:drift         # live poll into a throwaway DB, then assert stored brand/size == what the current matchers compute (fails on drift)
 npm start                   # poller + Discord + dashboard on :3080
 ```
 
@@ -107,7 +108,7 @@ Adding a market = one new adapter file in `src/markets/` implementing `MarketAda
 npm test
 ```
 
-52 unit/integration tests: Yahoo + Mercari parsers against HTML fixtures, brand matching (EN + JP), normalization/FX, threshold rules, scoring, proxy links, comp matching, and the SQLite store. Scrapers are fixture-based so CI never hits live sites; use `npm run smoke` for the live check.
+52 unit/integration tests: Yahoo + Mercari parsers against HTML fixtures, brand matching (EN + JP), normalization/FX, threshold rules, scoring, proxy links, comp matching, and the SQLite store. Scrapers are fixture-based so CI never hits live sites; use `npm run smoke` for the live check, or `npm run smoke:drift` to boot the full stack on a throwaway DB/port, run one live poll round, and assert zero drift between stored and computed brand/size values (Grailed is exempt from the size check — its adapter passes explicit sizes).
 
 ## Legal note
 

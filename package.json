@@ -13,7 +13,8 @@
     "dev": "tsx src/index.ts",
     "smoke": "tsx src/smoke.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke:drift": "tsx src/smoke-drift.ts"
   },
   "dependencies": {
     "cheerio": "^1.0.0",
