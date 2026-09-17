@@ -173,6 +173,13 @@ export class HttpClient {
       const next = new URL(String(res.headers.location), url).toString();
       return this.getWithRedirects(next, opts, depth + 1);
     }
+    if (res.statusCode >= 300 && res.statusCode < 400) {
+      // A redirect without a usable Location, or the chain exceeded
+      // MAX_REDIRECTS — fail rather than hand back the (already drained)
+      // redirect stub as page content.
+      res.body.dump();
+      throw new Error(`GET ${url} → ${res.statusCode} (redirect limit or missing Location)`);
+    }
     return res as unknown as { statusCode: number; body: { text(): Promise<string> } };
   }
 }

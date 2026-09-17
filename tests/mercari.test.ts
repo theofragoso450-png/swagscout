@@ -11,15 +11,18 @@ describe("MercariAdapter.parseHtml", () => {
     const listings = adapter.parseHtml(html);
     expect(listings.length).toBeGreaterThanOrEqual(2);
 
+    // Canonical numeric ids: the DOM href's "m" prefix is stripped so DOM
+    // and API paths dedupe to one row.
     const ids = listings.map((l) => l.id);
-    expect(ids).toContain("m12345678901");
-    expect(ids).toContain("m99887766554");
+    expect(ids).toContain("12345678901");
+    expect(ids).toContain("99887766554");
 
-    const cdg = listings.find((l) => l.id === "m12345678901")!;
+    const cdg = listings.find((l) => l.id === "12345678901")!;
     expect(cdg.title).toContain("コムデギャルソン");
     expect(cdg.price).toBe(5500);
     expect(cdg.currency).toBe("JPY");
     expect(cdg.brandKey).toBe("cdg");
+    // URL rebuilt in the real site's /item/m<numeric> shape, not raw href.
     expect(cdg.url).toBe("https://jp.mercari.com/item/m12345678901");
   });
 
