@@ -1,0 +1,49 @@
+name: Release
+
+# On a version tag push: build the Docker image, export it, and attach it
+# to the GitHub Release for that tag. Idempotent per tag — re-running the
+# workflow replaces the existing asset instead of duplicating it.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image (timed)
+        run: |
+          START=$(date +%s)
+          docker build -t "swagscout:${{ github.ref_name }}" .
+          BUILD_SECONDS=$(( $(date +%s) - START ))
+          echo "Docker build took ${BUILD_SECONDS}s"
+          if [ "$BUILD_SECONDS" -ge 90 ]; then
+            echo "::warning::Docker build took ${BUILD_SECONDS}s (threshold 90s). Dependency layers are heavy enough that buildx layer caching (mode=max, see PRs #3/#5) is worth re-measuring before assuming a plain build is fastest."
+          fi
+
+      - name: Export image
+        run: docker save "swagscout:${{ github.ref_name }}" | gzip > "swagscout-image-${{ github.ref_name }}.tar.gz"
+
+      # gh is preinstalled on GitHub runners; GITHUB_TOKEN (scoped to
+      # `contents: write` above) uploads the asset, creating the Release
+      # if it does not exist yet.
+      - name: Attach to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            "swagscout-image-${{ github.ref_name }}.tar.gz" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+      - name: Upload workflow artifact (7-day backup copy)
+        uses: actions/upload-artifact@v4
+        with:
+          name: swagscout-image-${{ github.ref_name }}
+          path: swagscout-image-*.tar.gz
+          retention-days: 7
