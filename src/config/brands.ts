@@ -39,9 +39,22 @@ export const BRANDS: Brand[] = [
   {
     key: "yohji",
     name: "Yohji Yamamoto",
-    aliases: ["yohji yamamoto", "yohji", "y's for men", "yohji yamamoto pour homme", "s'yte", "regulation yohji"],
+    aliases: ["yohji yamamoto", "yohji", "y's for men", "y’s for men", "yohji yamamoto pour homme", "s'yte", "regulation yohji"],
     jpAliases: ["ヨウジヤマモト", "ヨウジヤマモト プアオム", "洋裁山本"],
     searchTerms: ["ヨウジヤマモト", "yohji"],
+  },
+  {
+    key: "ys",
+    name: "Y's (Yohji Yamamoto women's)",
+    // NB: deliberately no bare "ys" alias — the substring would hit "boys"/
+    // "toys". Only apostrophe forms match. "y's for men" (yohji) is longer
+    // than "y's" and so keeps winning on those titles via index order.
+    aliases: ["y's", "y’s"],
+    jpAliases: ["ワイズ"],
+    // Genitive guard: "tommy's"/"sony's" contain "y's"; real Y's titles never
+    // mention those words (0 such collisions in the live corpus).
+    negativeJpAliases: ["tommy's", "tommy’s", "sony's", "sony’s"],
+    searchTerms: ["ヨウジヤマモト"],
   },
   {
     key: "issey",

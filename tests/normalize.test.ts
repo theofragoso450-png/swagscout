@@ -121,6 +121,32 @@ describe("matchBrand", () => {
   });
 });
 
+describe("Y's (Yohji women's line)", () => {
+  const CU = "\u2019"; // right single quotation mark
+
+  it("matches standalone Y's titles in both apostrophe variants + kana", () => {
+    expect(matchBrand("Y's ワイズ チュニック")?.brandKey).toBe("ys");
+    expect(matchBrand(`Y${CU}s パンツ`)?.brandKey).toBe("ys");
+    expect(matchBrand("ワイズ ロングコート")?.brandKey).toBe("ys");
+  });
+
+  it("keeps the men's line on yohji — longer aliases win", () => {
+    expect(matchBrand("Y's for men フラップ ポケット ブルゾン")?.brandKey).toBe("yohji");
+    // curly-apostrophe "y’s for men": without this yohji alias the title
+    // falls through to the 3-char "y’s" ys alias — wrong sub-line.
+    expect(matchBrand(`Y${CU}s for men ブルゾン`)?.brandKey).toBe("yohji");
+  });
+
+  it("never matches genitives or the bare ys substring", () => {
+    // "tommy's"/"sony's" contain "y's" — homonym guard must fire
+    expect(matchBrand("tommy's jeans デニム")).toBeUndefined();
+    expect(matchBrand(`sony${CU}s デジカメ`)).toBeUndefined();
+    // bare "ys" would hit "boys"/"toys" — deliberately not an alias
+    expect(matchBrand("boys トーク")).toBeUndefined();
+    expect(matchBrand("toy shop")).toBeUndefined();
+  });
+});
+
 describe("extractSize", () => {
   // — Branch 1: letter sizes (S/M/L/XS/XL/XXL), first match wins —
   it("finds letter sizes and normalizes case", () => {
