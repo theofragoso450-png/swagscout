@@ -35,12 +35,24 @@ const NOISE_WORDS = [
 ];
 
 export function extractSize(title: string): string | undefined {
-  // Match common size notations: S/M/L/XL, 1-7, W30, 28, "サイズM" etc.
+  // First match wins. Guards keep real-world junk out:
+  //  - letters: apostrophe/hyphen lookarounds so "Y's", "Levi's", "S'YTE",
+  //    and pattern names like "M-1柄" don't read as sizes
+  //  - digits: not inside decimals ("27.5"), style codes ("IM21-F0636-67",
+  //    "M-1"), or catalog numbers ("No.17")
+  //  - a unit-anchored fallback catches "Size25cm" where digits touch letters
   const patterns = [
-    /\b(x{0,2}s|m|l|x{1,3}l|xxl)\b/i,
-    /\b[1-7]\b/,
+    // letters: apostrophe lookarounds ("Y's", "Levi's", "S'YTE") and a
+    // trailing hyphen-DIGIT guard ("M-1柄" is a pattern name, "Size-XL" a size)
+    /(?<!['’])\b(x{0,2}s|m|l|x{1,3}l|xxl)\b(?!['’])(?!-?\d)/i,
+    /(?<![\w.'’-])\b[1-7]\b(?!\.\d)/i,
     /\bw(?:aist)?\s?\d{2}\b/i,
-    /\b\d{2}(?:\.\d)?\b(?=\s*(?:cm|inch)?)/,
+    // up to 3 decimals: shoe sizes (27.5) and New Era hat sizes (7.375)
+    /(?<![\w.'’-])\b\d{2}(?:\.\d{1,3})?(?:\s?(?:cm|inch))?\b/i,
+    /\d{2}(?:\.\d{1,3})?\s?(?:cm|inch)\b/i,
+    // single-digit decimals (8.5 US shoes, 7.375 New Era caps); bare
+    // 8/9 stay non-sizes, and 1-5 decimals ("1.5ml" samples) don't match
+    /(?<![\w.'’-])\b[6-9]\.\d{1,3}\b/i,
   ];
   for (const p of patterns) {
     const m = title.match(p);
