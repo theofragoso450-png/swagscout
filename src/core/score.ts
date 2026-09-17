@@ -14,10 +14,16 @@ export interface ScoreContext {
 
 /**
  * Evaluate a listing: threshold rule + cross-market comps → Deal (or null).
- * Returns undefined when neither engine fires.
+ * Returns undefined when neither engine fires. `extraReasons` (e.g. a
+ * price_drop observed by the poller) are seeded before scoring so the deal's
+ * score always reflects the reasons it carries.
  */
-export function evaluateDeal(l: Listing, ctx: ScoreContext): Deal | undefined {
-  const reasons: DealReason[] = [];
+export function evaluateDeal(
+  l: Listing,
+  ctx: ScoreContext,
+  extraReasons?: DealReason[],
+): Deal | undefined {
+  const reasons: DealReason[] = [...(extraReasons ?? [])];
 
   // 1) Static threshold rule
   const threshold = evaluateThreshold({

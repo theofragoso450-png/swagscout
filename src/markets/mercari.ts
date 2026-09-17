@@ -93,17 +93,21 @@ export class MercariAdapter implements MarketAdapter {
       return items
         .filter((it) => it && it.id && it.name && it.price > 0)
         .slice(0, max)
-        .map((it) =>
-          normalizeListing({
-            id: String(it.id),
+        .map((it) => {
+          // Canonical numeric id (API ids may arrive with an "m" prefix);
+          // URLs use the real site's /item/m<numeric> shape — same mapping
+          // as the DOM path so both feed one dedupe key.
+          const id = String(it.id).replace(/^m/, "");
+          return normalizeListing({
+            id,
             market: "mercari",
             title: it.name,
             price: it.price,
             currency: "JPY",
-            url: `${MERCARI_BASE}/items/m${it.id}`,
+            url: `${MERCARI_BASE}/item/m${id}`,
             imageUrl: it.photo,
-          }),
-        );
+          });
+        });
     } catch (err) {
       logger.debug({ err, market: this.id }, "mercari json api failed");
       return [];
@@ -134,8 +138,11 @@ export class MercariAdapter implements MarketAdapter {
       const $cell = $(el);
       const $a = $cell.find("a[data-testid='thumbnail-link']").first();
       const href = $a.attr("href") ?? "";
-      const m = href.match(/\/items?\/(m?\d+)/);
-      const id = m?.[1];
+      // Canonical numeric id: hrefs often carry an "m" prefix (/item/m123…).
+      // Strip it so DOM and API paths dedupe to one row; build the URL from
+      // the real site's /item/m<numeric> shape, never the raw captured href.
+      const raw = href.match(/\/items?\/(m?\d+)/)?.[1];
+      const id = raw?.replace(/^m/, "");
       if (!id) return;
       if (seen.has(id)) return;
       // title/price can sit inside or beside the anchor depending on layout
@@ -152,7 +159,7 @@ export class MercariAdapter implements MarketAdapter {
           title,
           price: priceNum,
           currency: "JPY",
-          url: `${MERCARI_BASE}/item/${id}`,
+          url: `${MERCARI_BASE}/item/m${id}`,
           imageUrl: img,
         }),
       );

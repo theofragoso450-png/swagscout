@@ -1,4 +1,4 @@
-import type { MarketId, PollResult, Listing, Deal } from "../types.js";
+import type { MarketId, PollResult, Listing, Deal, DealReason } from "../types.js";
 import { MARKET_LABEL } from "../types.js";
 import type { MarketAdapter } from "../markets/types.js";
 import type { Store } from "./store.js";
@@ -166,18 +166,20 @@ export class Poller {
               this.store.recordDeal(deal);
             }
           } else if (listing.priceUsd < existing.priceUsd * 0.97) {
-            // price drop ≥3%
+            // price drop ≥3% — seed the drop reason BEFORE evaluateDeal so
+            // deal.score reflects it (min_score gates read deal.score).
             this.store.upsertListing(listing);
             priceDrops++;
-            const deal = evaluateDeal(listing, {
-              store: this.store,
-              compRoundUsd: this.opts.compRoundUsd,
-            });
+            const drop: DealReason = {
+              kind: "price_drop",
+              detail: `dropped from $${existing.priceUsd.toFixed(0)} to $${listing.priceUsd.toFixed(0)}`,
+            };
+            const deal = evaluateDeal(
+              listing,
+              { store: this.store, compRoundUsd: this.opts.compRoundUsd },
+              [drop],
+            );
             if (deal) {
-              deal.reasons.push({
-                kind: "price_drop",
-                detail: `dropped from $${existing.priceUsd.toFixed(0)} to $${listing.priceUsd.toFixed(0)}`,
-              });
               deals.push(deal);
               this.store.recordDeal(deal);
             }
