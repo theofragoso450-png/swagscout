@@ -74,6 +74,51 @@ describe("matchBrand", () => {
   it("returns undefined for unknown brands", () => {
     expect(matchBrand("random unbranded hoodie")).toBeUndefined();
   });
+
+  // — Fuzzy fallback (runs only after the exact pass fails) —
+  // Misspelled/split/concatenated brand names are where mislabeled — and
+  // mispriced — archive listings hide.
+  it("catches misspelled brand names via the fuzzy fallback", () => {
+    expect(matchBrand("本人期復刻版 HERMUT LANG サスペンダー")?.brandKey).toBe("helmut-lang");
+    expect(matchBrand("RICKOWENS abstract geth army")?.brandKey).toBe("rick-owens");
+  });
+
+  it("catches concatenated brand names (very common on JP listings)", () => {
+    expect(matchBrand("ISSEYMIYAKE FÊTE シフォンツイスト カットソー")?.brandKey).toBe("issey");
+    expect(matchBrand("COMMEdesGARCONS HOMME DEUX イージーパンツ")?.brandKey).toBe("cdg");
+  });
+
+  it("catches space-split brand names", () => {
+    expect(matchBrand("UNDER COVER Tシャツ")?.brandKey).toBe("undercover");
+  });
+
+  it("accent-folds before fuzzy comparison", () => {
+    // "Comme des Garçuns"-style typo on the folded alias
+    expect(matchBrand("comme des garcuns tee")?.brandKey).toBe("cdg");
+  });
+
+  it("keeps short aliases exact-only (typo ambiguity)", () => {
+    // "ebisu" is a place/word (Saga Ebisu sake cup) and Yebisu the beer —
+    // distance-1 from evisu. The DB differential proved these false
+    // positives; 5-char aliases must never fuzzy-match.
+    expect(matchBrand("Saga Ebisu お猪口 ぐい飲み 陶器")).toBeUndefined();
+    expect(matchBrand("Yebisu beer glasses")).toBeUndefined();
+    // exact spelling still works
+    expect(matchBrand("EVISU jeans 2002")?.brandKey).toBe("evisu");
+  });
+
+  it("fuzzy respects the homonym guard", () => {
+    // "MARMOT CAPITAL" is outdoor gear, not Kapital — 'capital' is on
+    // kapital's negative list.
+    expect(matchBrand("MARMOT CAPITAL パーテックス シアージャケット")).toBeUndefined();
+    // genuine Kapital still matches exactly
+    expect(matchBrand("KAPITAL No.3 bootcut denim")?.brandKey).toBe("kapital");
+  });
+
+  it("never fuzzy-matches model codes, digits, or CJK windows", () => {
+    expect(matchBrand("adidas F34246 デトロイトランナー")).toBeUndefined();
+    expect(matchBrand("IM21-F0636-67 カーディガン")).toBeUndefined();
+  });
 });
 
 describe("extractSize", () => {
