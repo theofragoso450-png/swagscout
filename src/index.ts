@@ -84,15 +84,15 @@ async function main(): Promise<void> {
   const dashboard = startDashboard(store, env.port, () => {
     const listings = store.recentListings(24 * 14);
     const deals = store.recentDeals(["all"], 1000);
-    const byMarket = Object.fromEntries(
-      ALL_MARKETS.map((m) => [
-        m,
-        listings.filter((l) => l.market === m).length,
-      ]),
-    );
-    return `listings(14d): ${listings.length} · deals: ${deals.length} · markets: ${Object.entries(byMarket)
-      .map(([m, c]) => `${m}:${c}`)
-      .join(" ")}`;
+    // Busiest markets lead; zeros trail so a stalled market is still visible.
+    const perMarket = ALL_MARKETS.map((m) => ({
+      m,
+      c: listings.filter((l) => l.market === m).length,
+    })).sort((a, b) => b.c - a.c);
+    const fmt = (n: number) => n.toLocaleString("en-US");
+    return `${fmt(listings.length)} listings · ${fmt(deals.length)} deals · last 14d · ${perMarket
+      .map((p) => `${p.m} ${fmt(p.c)}`)
+      .join(" · ")}`;
   });
 
   await notifier.start();
