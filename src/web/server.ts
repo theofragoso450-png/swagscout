@@ -37,43 +37,60 @@ const PAGE = `
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:#0d1117; color:#e6edf3; }
-  header { padding:18px 24px; border-bottom:1px solid #21262d; display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
+  body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:#0d1117; color:#e6edf3; -webkit-font-smoothing:antialiased; }
+  header { padding:22px 28px; border-bottom:1px solid #21262d; display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
   h1 { font-size:18px; margin:0; letter-spacing:.5px; }
   h1 span { color:#3fb950; }
   .sub { color:#8b949e; font-size:13px; }
-  .bar { padding:12px 24px; display:flex; gap:8px; flex-wrap:wrap; border-bottom:1px solid #21262d; }
-  select, input { background:#161b22; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:6px 10px; font-size:13px; }
-  main { padding: 16px 24px; }
-  .deal { border:1px solid #21262d; border-radius:10px; padding:12px 14px; margin-bottom:10px; display:flex; gap:14px; background:#161b22; }
-  .deal img { width:72px; height:72px; object-fit:cover; border-radius:8px; background:#21262d; }
+  .tagline { color:#8b949e; font-size:12.5px; margin-top:2px; }
+  .bar { padding:14px 28px; display:flex; gap:8px; flex-wrap:wrap; border-bottom:1px solid #21262d; }
+  select, input { background:#161b22; color:#e6edf3; border:1px solid #30363d; border-radius:8px; padding:7px 10px; font-size:13px; transition:border-color .15s, background .15s; }
+  select:hover, input:hover { border-color:#3d444d; }
+  select:focus-visible, input:focus-visible { outline:none; border-color:#3fb950; box-shadow:0 0 0 3px rgba(63,185,80,.13); }
+  select { cursor:pointer; }
+  main { padding: 18px 28px 28px; }
+  .deal { border:1px solid #21262d; border-radius:12px; padding:14px 16px; margin-bottom:12px; display:flex; gap:14px; background:#161b22; transition:border-color .15s, transform .15s; }
+  .deal:hover { border-color:#3d444d; transform:translateY(-1px); }
+  .deal img { width:76px; height:76px; object-fit:cover; border-radius:10px; background:#21262d; flex:none; }
+  .imgph { display:inline-block; width:76px; height:76px; border-radius:10px; flex:none; background:linear-gradient(135deg,#1c2129,#262c36); border:1px dashed #30363d; }
   .meta { flex:1; min-width:0; }
-  .title { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .title { font-weight:600; font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .title a { color:#e6edf3; text-decoration:none; }
   .title a:hover { color:#58a6ff; }
-  .row { font-size:12px; color:#8b949e; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap; }
+  .row { font-size:12px; color:#8b949e; margin-top:6px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .price { color:#e6edf3; font-weight:600; font-size:13px; }
   .badge { background:#21262d; border-radius:999px; padding:1px 8px; font-size:11px; }
-  .score { color:#3fb950; font-weight:700; }
+  .score { color:#3fb950; font-weight:700; background:rgba(63,185,80,.08); border:1px solid rgba(63,185,80,.25); border-radius:999px; padding:0 8px; font-size:11px; }
   .badge.size { color:#79c0ff; }
   .badge.cond-new { color:#3fb950; }
   .badge.cond-like-new { color:#d29922; }
   .badge.cond-used { color:#8b949e; }
   .reasons { font-size:12px; color:#d29922; margin-top:4px; }
   .proxies a { color:#58a6ff; font-size:12px; margin-right:8px; text-decoration:none; }
-  .empty { color:#8b949e; padding:32px 0; text-align:center; }
-  .finds-head { font-size:15px; font-weight:700; margin:18px 0 10px; }
+  .empty { color:#8b949e; padding:40px 0; text-align:center; font-size:14px; position:relative; }
+  .empty .imgph { width:44px; height:44px; margin:0 auto 10px; display:block; opacity:.5; }
+  .link { background:none; border:none; color:#58a6ff; cursor:pointer; font-size:13px; padding:2px 4px; }
+  .link:hover { text-decoration:underline; }
+  .finds-head { font-size:16px; font-weight:700; margin:22px 0 10px; letter-spacing:.2px; display:flex; align-items:center; gap:10px; }
+  .finds-head::before { content:""; width:8px; height:8px; border-radius:999px; background:#3fb950; box-shadow:0 0 8px rgba(63,185,80,.4); }
   .tier { border-radius:999px; padding:1px 8px; font-size:11px; font-weight:700; margin-right:8px; }
   .tier-S { background:#1f6feb; color:#ffffff; }
   .tier-A { background:#238636; color:#ffffff; }
   .tier-B { background:#9e6a03; color:#ffffff; }
   .tier-C { background:#30363d; color:#c9d1d9; }
   .finds-empty { color:#8b949e; font-size:13px; margin:10px 0 4px; }
+  .dot { width:8px; height:8px; border-radius:999px; background:#30363d; display:inline-block; margin-right:6px; transition:background .4s, box-shadow .4s; }
+  .dot.on { background:#3fb950; box-shadow:0 0 6px rgba(63,185,80,.5); }
+  .dot.err { background:#d29922; box-shadow:0 0 6px rgba(210,153,34,.5); }
 </style>
 </head>
 <body>
 <header>
-  <h1>Swag<span>Scout</span></h1>
-  <div class="sub" id="stats">loading…</div>
+  <div>
+    <h1>Swag<span>Scout</span></h1>
+    <div class="tagline">Live cross-market scout for archive fashion deals</div>
+  </div>
+  <div class="sub"><span id="dot"></span><span id="stats">loading…</span></div>
 </header>
 <div class="bar">
   <select id="market"><option value="">All markets</option></select>
@@ -86,12 +103,16 @@ const PAGE = `
   </select>
   <input id="q" type="search" placeholder="Filter titles…">
 </div>
-<section id="finds"></section>
-<main id="feed"><div class="empty">No deals yet — the poller is warming up.</div></main>
+<section id="finds">
+  <h2 class="finds-head">Finds of the day</h2>
+  <div id="findsPulse"></div>
+</section>
+<main id="feed"><div class="empty">Scouting markets — first deals land within minutes.</div></main>
 <script>
   const markets = ${JSON.stringify(ALL_MARKETS.map((m) => ({ id: m, label: MARKET_LABEL[m] })))};
   const brands = ${JSON.stringify(BRANDS.map((b) => ({ key: b.key, name: b.name })))};
   const conditionLabels = ${JSON.stringify(CONDITION_LABEL)};
+  const PLACEHOLDER = '<div class="imgph" aria-hidden="true"></div>';
   for (const m of markets) {
     document.getElementById("market").insertAdjacentHTML("beforeend", \`<option value="\${m.id}">\${m.label}</option>\`);
   }
@@ -111,15 +132,18 @@ const PAGE = `
   rebuildSizeOptions();
   setInterval(rebuildSizeOptions, 60000);
   async function loadFinds() {
-    const res = await fetch("/api/finds");
-    const data = await res.json();
-    const el = document.getElementById("finds");
+    const pulse = document.getElementById("findsPulse");
+    let data;
+    try {
+      const res = await fetch("/api/finds");
+      data = await res.json();
+    } catch { return; }
     if (!data.finds.length) {
-      el.innerHTML = '<h2 class="finds-head">Finds of the day</h2>' +
-        '<div class="finds-empty">No comp-backed finds in the last 24h — deals with a cross-market comp ("X% below N-listing median") rank here.</div>';
+      pulse.innerHTML = PLACEHOLDER +
+        '<div class="finds-empty">No comp-backed finds yet — deals sitting far below a cross-market median rank here once the comp engine warms up.</div>';
       return;
     }
-    el.innerHTML = '<h2 class="finds-head">Finds of the day</h2>' + data.finds.map(render).join("");
+    pulse.innerHTML = data.finds.map(render).join("");
   }
   loadFinds();
   setInterval(loadFinds, 60000);
@@ -136,12 +160,28 @@ const PAGE = `
     if (z) p.set("size", z);
     if (s) p.set("sort", s);
     if (q) p.set("q", q);
-    const res = await fetch("/api/deals?" + p.toString());
-    const data = await res.json();
+    let data;
+    try {
+      const res = await fetch("/api/deals?" + p.toString());
+      data = await res.json();
+    } catch { markLive(false); return; }
+    markLive(true);
     const feed = document.getElementById("feed");
-    if (!data.deals.length) { feed.innerHTML = '<div class="empty">No deals match.</div>'; }
-    else feed.innerHTML = data.deals.map(render).join("");
+    if (!data.deals.length) {
+      feed.innerHTML = '<div class="empty">' + PLACEHOLDER + '<div>No deals match your filters.</div><button class="link" id="clearFilters">Clear filters</button></div>';
+      const cf = document.getElementById("clearFilters");
+      if (cf) cf.addEventListener("click", clearFilters);
+    } else {
+      feed.innerHTML = data.deals.map(render).join("");
+    }
     document.getElementById("stats").textContent = data.stats;
+  }
+  const dot = document.getElementById("dot");
+  function markLive(ok) { if (!dot) return; dot.classList.toggle("on", ok); dot.classList.toggle("err", !ok); }
+  function clearFilters() {
+    for (const id of ["market", "brand", "size", "sort"]) document.getElementById(id).value = "";
+    document.getElementById("q").value = "";
+    refresh();
   }
   // Marketplace-controlled URLs (listing + proxy links) must never carry an
   // executable scheme; anything not resolving to http(s) renders inert ("#").
@@ -158,14 +198,14 @@ const PAGE = `
     const reasons = (d.reasons||[]).filter(r => !isFind || r.kind === "comp").map(r => "• " + r.detail).join(" &nbsp; ");
     const proxies = Object.entries(d.proxy||{}).map(([k,v]) => \`<a href="\${escapeHtml(safeUrl(v))}" target="_blank">\${escapeHtml(k[0].toUpperCase()+k.slice(1))}</a>\`).join("");
     return \`<div class="deal">
-      \${d.imageUrl ? \`<img src="\${escapeHtml(safeUrl(d.imageUrl))}" loading="lazy" onerror="this.onerror=null;this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' >"}
+      \${d.imageUrl ? \`<img src="\${escapeHtml(safeUrl(d.imageUrl))}" loading="lazy" onerror="this.classList.add('imgph');this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img class='img imgph' src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' alt=''>"}
       <div class="meta">
         <div class="title">\${d.rank != null ? \`<span class="tier tier-\${escapeHtml(d.tier)}">\${escapeHtml(d.findLabel)}</span>\` : ""}<a href="\${escapeHtml(safeUrl(d.url))}" target="_blank">\${escapeHtml(d.title)}</a></div>
         <div class="row">
           <span class="badge">\${escapeHtml(d.marketLabel)}</span>
           \${d.size ? \`<span class="badge size">\${escapeHtml(d.size)}</span>\` : ""}
           \${!isFind && d.condition ? \`<span class="badge cond cond-\${escapeHtml(d.condition)}">\${escapeHtml(conditionLabels[d.condition] || d.condition)}</span>\` : ""}
-          <span>\${d.priceLabel}</span>
+          <span class="price">\${d.priceLabel}</span>
           <span class="score">score \${d.score}</span>
           \${!isFind && d.endsInMin != null && d.endsInMin > 0 ? \`<span>ends in \${fmtDur(d.endsInMin)}</span>\` : ""}
         </div>
