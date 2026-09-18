@@ -164,6 +164,9 @@ const PAGE = `
     let data;
     try {
       const res = await fetch("/api/deals?" + p.toString());
+      // HTTP-level failures (500s etc.) must read as failure, not success —
+      // a 500 with a parseable body would otherwise skip the catch below.
+      if (!res.ok) { markLive(false); return; }
       data = await res.json();
     } catch { markLive(false); return; }
     markLive(true);
