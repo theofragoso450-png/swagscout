@@ -1,6 +1,7 @@
 import { loadEnv, ensureDbDir } from "./config/env.js";
 import { logger } from "./logger.js";
 import { Store } from "./core/store.js";
+import { recomputeStale } from "./core/recompute.js";
 import { HttpClient, closeSharedDispatcher } from "./core/http.js";
 import { runShutdown, type Signal } from "./core/shutdown.js";
 import { Poller } from "./core/poller.js";
@@ -38,6 +39,17 @@ async function main(): Promise<void> {
   // Daily finds digest — only meaningful with a bot client that can post.
   if (env.digestHour !== undefined && env.discordToken) {
     notifier.startDigest(env.digestHour);
+  }
+
+  // Pipeline catch-up: rows stored by an older extraction pipeline get their
+  // brand/size/deal fields recomputed by the current one. Bump PIPELINE_VERSION
+  // to trigger; a no-op when everything is current.
+  const recompute = recomputeStale(store, { compRoundUsd: env.compRoundUsd });
+  if (recompute.remaining > 0) {
+    logger.warn(
+      { remaining: recompute.remaining },
+      "stale rows remain — they will be recomputed on next boot",
+    );
   }
 
   const poller = new Poller(

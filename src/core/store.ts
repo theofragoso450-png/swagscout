@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Deal, Listing, MarketId } from "../types.js";
 import { proxyLinks } from "../proxy/links.js";
+import { PIPELINE_VERSION } from "./pipeline.js";
 
 export interface StoredListing {
   key: string; // `${market}:${id}`
@@ -56,6 +57,11 @@ export class Store {
   private insertDealStmt: StatementSync;
   private recentDealsStmt: StatementSync;
   private recentDealsByBrandStmt: StatementSync;
+  private staleListingsStmt: StatementSync;
+  private countStaleStmt: StatementSync;
+  private updateDerivedStmt: StatementSync;
+  private hasDealStmt: StatementSync;
+  private deleteDealsForStmt: StatementSync;
 
   constructor(dbPath: string) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -77,6 +83,15 @@ export class Store {
     if (!subCols.some((c) => c.name === "size")) {
       this.db.exec("ALTER TABLE subscriptions ADD COLUMN size TEXT");
     }
+    // Pipeline versioning: rows stamped with the version of the extraction
+    // pipeline that produced them. 0 = pre-versioning (always stale).
+    if (!cols.some((c) => c.name === "pipelineVersion")) {
+      this.db.exec("ALTER TABLE listings ADD COLUMN pipelineVersion INTEGER NOT NULL DEFAULT 0");
+    }
+    const dealCols = this.db.prepare("PRAGMA table_info(deals)").all() as Array<{ name: string }>;
+    if (!dealCols.some((c) => c.name === "pipelineVersion")) {
+      this.db.exec("ALTER TABLE deals ADD COLUMN pipelineVersion INTEGER NOT NULL DEFAULT 0");
+    }
 
     this.hasStmt = this.db.prepare(
       "SELECT 1 AS one FROM listings WHERE market = ? AND marketId = ? LIMIT 1",
@@ -87,10 +102,10 @@ export class Store {
     this.upsertListingStmt = this.db.prepare(`
       INSERT INTO listings
         (key, market, marketId, title, brandKey, item, size, condition, price, currency, priceUsd,
-         url, imageUrl, endsAt, foundAt, updatedAt)
+         url, imageUrl, endsAt, foundAt, updatedAt, pipelineVersion)
       VALUES
         (@key, @market, @marketId, @title, @brandKey, @item, @size, @condition, @price, @currency, @priceUsd,
-         @url, @imageUrl, @endsAt, @foundAt, @updatedAt)
+         @url, @imageUrl, @endsAt, @foundAt, @updatedAt, @pipelineVersion)
       ON CONFLICT(key) DO UPDATE SET
         title = excluded.title,
         brandKey = excluded.brandKey,
@@ -103,7 +118,8 @@ export class Store {
         url = excluded.url,
         imageUrl = excluded.imageUrl,
         endsAt = excluded.endsAt,
-        updatedAt = excluded.updatedAt
+        updatedAt = excluded.updatedAt,
+        pipelineVersion = excluded.pipelineVersion
     `);
     this.recentStmt = this.db.prepare(
       "SELECT * FROM listings WHERE updatedAt >= ? ORDER BY priceUsd DESC LIMIT 2000",
@@ -132,9 +148,20 @@ export class Store {
     );
     this.getMetaStmt = this.db.prepare("SELECT value FROM meta WHERE key = ?");
     this.insertDealStmt = this.db.prepare(`
-      INSERT INTO deals (listingKey, market, marketId, title, brandKey, priceUsd, url, reasons, score, foundAt)
-      VALUES (@listingKey, @market, @marketId, @title, @brandKey, @priceUsd, @url, @reasons, @score, @foundAt)
+      INSERT INTO deals (listingKey, market, marketId, title, brandKey, priceUsd, url, reasons, score, foundAt, pipelineVersion)
+      VALUES (@listingKey, @market, @marketId, @title, @brandKey, @priceUsd, @url, @reasons, @score, @foundAt, @pipelineVersion)
     `);
+    this.staleListingsStmt = this.db.prepare(
+      `SELECT * FROM listings WHERE pipelineVersion < ? ORDER BY foundAt LIMIT ?`,
+    );
+    this.countStaleStmt = this.db.prepare(
+      "SELECT COUNT(*) AS c FROM listings WHERE pipelineVersion < ?",
+    );
+    this.updateDerivedStmt = this.db.prepare(
+      "UPDATE listings SET brandKey = ?, size = ?, pipelineVersion = ? WHERE key = ?",
+    );
+    this.hasDealStmt = this.db.prepare("SELECT 1 AS one FROM deals WHERE listingKey = ? LIMIT 1");
+    this.deleteDealsForStmt = this.db.prepare("DELETE FROM deals WHERE listingKey = ?");
     this.recentDealsStmt = this.db.prepare(
       `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
@@ -231,6 +258,7 @@ export class Store {
       endsAt: l.endsAt ?? null,
       foundAt: l.foundAt,
       updatedAt: now,
+      pipelineVersion: PIPELINE_VERSION,
     });
   }
 
@@ -300,6 +328,7 @@ export class Store {
       reasons: JSON.stringify(deal.reasons),
       score: deal.score,
       foundAt: l.foundAt,
+      pipelineVersion: PIPELINE_VERSION,
     });
   }
 
@@ -358,6 +387,56 @@ export class Store {
         reasons: JSON.parse(r.reasons) as Deal["reasons"],
         score: r.score,
       }));
+  }
+
+  // ── pipeline recompute support ──────────────────────────────────────────
+
+  /** Run `fn` inside a single write transaction; rolls back on throw. */
+  transaction<T>(fn: () => T): T {
+    this.db.exec("BEGIN");
+    try {
+      const out = fn();
+      this.db.exec("COMMIT");
+      return out;
+    } catch (err) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        /* no transaction open */
+        /* eslint-disable-next-line */
+      }
+      throw err;
+    }
+  }
+
+  staleListings(limit: number): StoredListing[] {
+    return this.staleListingsStmt.all(PIPELINE_VERSION, limit) as unknown as StoredListing[];
+  }
+
+  countStale(): number {
+    const row = this.countStaleStmt.get(PIPELINE_VERSION) as unknown as { c: number };
+    return row.c;
+  }
+
+  /** Total listings, for logging context around recompute batches. */
+  countListings(): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS c FROM listings").get() as unknown as {
+      c: number;
+    };
+    return row.c;
+  }
+
+  /** Policy-gated derived-value update for one listing row. */
+  updateDerivedValues(key: string, brandKey: string | null, size: string | null): void {
+    this.updateDerivedStmt.run(brandKey, size, PIPELINE_VERSION, key);
+  }
+
+  dealExistsFor(listingKey: string): boolean {
+    return this.hasDealStmt.get(listingKey) !== undefined;
+  }
+
+  deleteDealsFor(listingKey: string): number {
+    return Number(this.deleteDealsForStmt.run(listingKey).changes);
   }
 
   // ── meta ─────────────────────────────────────────────────────────────────
