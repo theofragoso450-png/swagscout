@@ -53,6 +53,17 @@ export function classifyRarity(score: number): Rarity {
   return "C";
 }
 
+/**
+ * Pool sizing for the finds surfaces: fetch exactly the documented window
+ * (default 24h) rather than a newest-N guess. At high ingest a fixed
+ * newest-N pool silently truncates the window — measured on this codebase's
+ * own data, 500 rows spanned only ~7h.
+ */
+export function findsPool(nowMs: number, windowHours = 24): { since: string; limit: number } {
+  const since = new Date(nowMs - windowHours * 3_600_000).toISOString();
+  return { since, limit: 2000 };
+}
+
 /** Rank the day's comp-backed finds. Ties break to the earliest find. */
 export function rankFinds(
   deals: Deal[],

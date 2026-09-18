@@ -1,5 +1,5 @@
 import type { Store } from "../core/store.js";
-import { rankFinds } from "./finds.js";
+import { rankFinds, findsPool } from "./finds.js";
 import { buildFindEmbeds, type EmbedPayload } from "./embeds.js";
 
 /**
@@ -64,7 +64,8 @@ export async function digestTick(
     return { triggered: false, sentTo: [], findCount: 0 };
   }
 
-  const finds = rankFinds(store.recentDeals(["all"], 500), 24, now);
+  const pool = findsPool(now);
+  const finds = rankFinds(store.recentDeals(["all"], pool.limit, { since: pool.since }), 24, now);
   const channels = [...new Set(store.listSubscriptions().map((s) => s.channelId))];
   let sentTo: string[] = [];
   if (finds.length > 0 && channels.length > 0) {

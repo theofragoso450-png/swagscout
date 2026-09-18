@@ -57,6 +57,8 @@ export class Store {
   private insertDealStmt: StatementSync;
   private recentDealsStmt: StatementSync;
   private recentDealsByBrandStmt: StatementSync;
+  private recentDealsSinceStmt: StatementSync;
+  private recentDealsByBrandSinceStmt: StatementSync;
   private staleListingsStmt: StatementSync;
   private countStaleStmt: StatementSync;
   private updateDerivedStmt: StatementSync;
@@ -171,6 +173,17 @@ export class Store {
       `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        WHERE d.brandKey = ? ORDER BY d.foundAt DESC LIMIT ?`,
+    );
+    this.recentDealsSinceStmt = this.db.prepare(
+      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
+       FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
+       WHERE d.foundAt >= ?
+       ORDER BY d.foundAt DESC LIMIT ?`,
+    );
+    this.recentDealsByBrandSinceStmt = this.db.prepare(
+      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
+       FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
+       WHERE d.brandKey = ? AND d.foundAt >= ? ORDER BY d.foundAt DESC LIMIT ?`,
     );
   }
 
@@ -333,9 +346,14 @@ export class Store {
   }
 
   /** Recent deals for watches (brand keys or "all"), newest first.
-   *  When `brand` is set, query brand-scoped so a niche brand is not starved
-   *  out by the newest-N window (the dashboard filter relies on this). */
-  recentDeals(watches: string[], limit: number, brand?: string): Deal[] {
+   *  `opts.brand` scopes the SQL to the brand so a niche brand is not starved
+   *  out by the newest-N window (the dashboard filter relies on this).
+   *  `opts.since` bounds the query in time — surfaces that document a window
+   *  (finds ranking: 24h) must pass it, or high ingest shrinks their
+   *  effective window to whatever the newest-N limit happens to cover. */
+  recentDeals(watches: string[], limit: number, opts?: { brand?: string; since?: string }): Deal[] {
+    const brand = opts?.brand;
+    const since = opts?.since;
     type DealRow = {
       market: string;
       marketId: string;
@@ -351,9 +369,13 @@ export class Store {
       condition: string | null;
     };
     const rows = (
-      brand !== undefined
-        ? this.recentDealsByBrandStmt.all(brand, limit)
-        : this.recentDealsStmt.all(limit)
+      brand !== undefined && since !== undefined
+        ? this.recentDealsByBrandSinceStmt.all(brand, since, limit)
+        : brand !== undefined
+          ? this.recentDealsByBrandStmt.all(brand, limit)
+          : since !== undefined
+            ? this.recentDealsSinceStmt.all(since, limit)
+            : this.recentDealsStmt.all(limit)
     ) as unknown as DealRow[];
     const watchSet = new Set(watches);
     return rows

@@ -103,7 +103,7 @@ describe("Store", () => {
         score: 40,
       });
     }
-    const byBrand = store.recentDeals(["cdg"], 10, "cdg");
+    const byBrand = store.recentDeals(["cdg"], 10, { brand: "cdg" });
     expect(byBrand).toHaveLength(1);
     expect(byBrand[0]!.listing.brandKey).toBe("cdg");
     store.close();

@@ -139,6 +139,36 @@ describe("digestTick", () => {
     expect(store.getMeta("digest:lastSent")).toBe(String(T_SLOT));
   });
 
+  it("digest sees the whole 24h window, not just the newest 500 rows", async () => {
+    // Flood with 600 threshold-only deals newer than the comp find. The old
+    // implementation pooled the newest 500 rows, so the comp find (20h old)
+    // was beyond the pool and the digest would have missed it entirely.
+    for (let i = 0; i < 600; i++) {
+      const d = compDeal(`flood${i}`, 10, 5, 50, new Date(T_SLOT - (i % 6) * 60_000).toISOString());
+      d.reasons = [{ kind: "threshold", detail: "price $50 ≤ $200 — flood row" }];
+      store.upsertListing(d.listing);
+      store.recordDeal(d);
+    }
+    const old = compDeal("old-find", 60, 40, 1200, new Date(T_SLOT - 20 * HOUR).toISOString());
+    store.upsertListing(old.listing);
+    store.recordDeal(old);
+    store.addSubscription({ guildId: "g", channelId: "c1", watch: "all", minScore: 0 });
+
+    // store-level proof: the since-scoped query covers the 20h-old row
+    const since = new Date(T_SLOT - 24 * HOUR).toISOString();
+    expect(store.recentDeals(["all"], 2000, { since }).some((d) => d.listing.id === "old-find")).toBe(true);
+
+    let embeds: unknown[] = [];
+    const r = await digestTick(T_SLOT, store, async (e, channels) => {
+      embeds = e;
+      return channels;
+    });
+    expect(r.triggered).toBe(true);
+    expect(r.findCount).toBe(1); // flood rows are threshold-only: they cannot rank
+    const fields = (embeds as Array<{ fields: Array<{ name: string; value: string }> }>)[0]!.fields;
+    expect(fields[0]).toMatchObject({ name: "Find", value: "#1 · S-tier" });
+  });
+
   it("send failure does NOT mark the slot — next tick retries", async () => {
     const l = compDeal("d2", 50, 20, 200).listing;
     store.upsertListing(l);
