@@ -46,6 +46,12 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
     note: "Yohji mainline under $350",
   },
   {
+    brandKey: "ys",
+    maxUsd: 150,
+    excludeTerms: REP_EXCLUDE,
+    note: "Y's (Yohji women's) under $150",
+  },
+  {
     brandKey: "issey",
     maxUsd: 200,
     excludeTerms: [...REP_EXCLUDE, "perfume", "fragrance", "cologne"],
