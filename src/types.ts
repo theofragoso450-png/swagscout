@@ -30,6 +30,8 @@ export interface Listing {
   /** Short item descriptor (e.g. "thermal long sleeve tee"). */
   item?: string;
   size?: string;
+  /** Sold-velocity: set when the listing is absent from complete poll rounds of its market (absent-since timestamp). Undefined while live. */
+  missingSince?: string;
   /** Normalized condition derived from the marketplace's title markers. */
   condition?: string;
   /** Listing end time, when the market exposes one (auctions). ISO string. */
