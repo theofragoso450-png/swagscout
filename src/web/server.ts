@@ -6,6 +6,7 @@ import { THRESHOLD_RULES } from "../config/rules.js";
 import type { Deal } from "../types.js";
 import { fetchThumb, isAllowedImageUrl } from "./thumbs.js";
 import { extractCondition } from "../core/normalize.js";
+import { rankFinds } from "../notify/finds.js";
 
 const CONDITION_LABEL: Record<string, string> = {
   new: "New",
@@ -60,6 +61,13 @@ const PAGE = `
   .reasons { font-size:12px; color:#d29922; margin-top:4px; }
   .proxies a { color:#58a6ff; font-size:12px; margin-right:8px; text-decoration:none; }
   .empty { color:#8b949e; padding:32px 0; text-align:center; }
+  .finds-head { font-size:15px; font-weight:700; margin:18px 0 10px; }
+  .tier { border-radius:999px; padding:1px 8px; font-size:11px; font-weight:700; margin-right:8px; }
+  .tier-S { background:#1f6feb; color:#ffffff; }
+  .tier-A { background:#238636; color:#ffffff; }
+  .tier-B { background:#9e6a03; color:#ffffff; }
+  .tier-C { background:#30363d; color:#c9d1d9; }
+  .finds-empty { color:#8b949e; font-size:13px; margin:10px 0 4px; }
 </style>
 </head>
 <body>
@@ -78,6 +86,7 @@ const PAGE = `
   </select>
   <input id="q" type="search" placeholder="Filter titles…">
 </div>
+<section id="finds"></section>
 <main id="feed"><div class="empty">No deals yet — the poller is warming up.</div></main>
 <script>
   const markets = ${JSON.stringify(ALL_MARKETS.map((m) => ({ id: m, label: MARKET_LABEL[m] })))};
@@ -101,6 +110,19 @@ const PAGE = `
   }
   rebuildSizeOptions();
   setInterval(rebuildSizeOptions, 60000);
+  async function loadFinds() {
+    const res = await fetch("/api/finds");
+    const data = await res.json();
+    const el = document.getElementById("finds");
+    if (!data.finds.length) {
+      el.innerHTML = '<h2 class="finds-head">Finds of the day</h2>' +
+        '<div class="finds-empty">No comp-backed finds in the last 24h — deals with a cross-market comp ("X% below N-listing median") rank here.</div>';
+      return;
+    }
+    el.innerHTML = '<h2 class="finds-head">Finds of the day</h2>' + data.finds.map(render).join("");
+  }
+  loadFinds();
+  setInterval(loadFinds, 60000);
   let timer;
   async function refresh() {
     const p = new URLSearchParams();
@@ -132,19 +154,20 @@ const PAGE = `
     } catch { return "#"; }
   }
   function render(d) {
-    const reasons = (d.reasons||[]).map(r => "• " + r.detail).join(" &nbsp; ");
+    const isFind = d.rank != null;
+    const reasons = (d.reasons||[]).filter(r => !isFind || r.kind === "comp").map(r => "• " + r.detail).join(" &nbsp; ");
     const proxies = Object.entries(d.proxy||{}).map(([k,v]) => \`<a href="\${escapeHtml(safeUrl(v))}" target="_blank">\${escapeHtml(k[0].toUpperCase()+k.slice(1))}</a>\`).join("");
     return \`<div class="deal">
       \${d.imageUrl ? \`<img src="\${escapeHtml(safeUrl(d.imageUrl))}" loading="lazy" onerror="this.onerror=null;this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' >"}
       <div class="meta">
-        <div class="title"><a href="\${escapeHtml(safeUrl(d.url))}" target="_blank">\${escapeHtml(d.title)}</a></div>
+        <div class="title">\${d.rank != null ? \`<span class="tier tier-\${escapeHtml(d.tier)}">\${escapeHtml(d.findLabel)}</span>\` : ""}<a href="\${escapeHtml(safeUrl(d.url))}" target="_blank">\${escapeHtml(d.title)}</a></div>
         <div class="row">
           <span class="badge">\${escapeHtml(d.marketLabel)}</span>
           \${d.size ? \`<span class="badge size">\${escapeHtml(d.size)}</span>\` : ""}
-          \${d.condition ? \`<span class="badge cond cond-\${escapeHtml(d.condition)}">\${escapeHtml(conditionLabels[d.condition] || d.condition)}</span>\` : ""}
+          \${!isFind && d.condition ? \`<span class="badge cond cond-\${escapeHtml(d.condition)}">\${escapeHtml(conditionLabels[d.condition] || d.condition)}</span>\` : ""}
           <span>\${d.priceLabel}</span>
           <span class="score">score \${d.score}</span>
-          \${d.endsInMin != null && d.endsInMin > 0 ? \`<span>ends in \${fmtDur(d.endsInMin)}</span>\` : ""}
+          \${!isFind && d.endsInMin != null && d.endsInMin > 0 ? \`<span>ends in \${fmtDur(d.endsInMin)}</span>\` : ""}
         </div>
         <div class="reasons">\${reasons}</div>
         <div class="proxies">\${proxies}</div>
@@ -198,6 +221,34 @@ export function startDashboard(
     q?: string;
   }
 
+  /** Shared deal → wire-item mapper for /api/deals and /api/finds. */
+  function dealItem(d: Deal) {
+    return {
+      title: d.listing.title,
+      url: safeUrl(d.listing.url),
+      imageUrl:
+        d.listing.imageUrl && isAllowedImageUrl(d.listing.imageUrl)
+          ? `/api/thumb?u=${encodeURIComponent(d.listing.imageUrl)}`
+          : null,
+      size: d.listing.size ?? null,
+      condition:
+        d.listing.condition ??
+        (d.listing.title ? extractCondition(d.listing.title) : undefined) ??
+        null,
+      marketLabel: MARKET_LABEL[d.listing.market],
+      priceLabel:
+        d.listing.currency === "JPY"
+          ? `¥${d.listing.price.toLocaleString("en-US")} ≈ $${d.listing.priceUsd.toFixed(0)}`
+          : `$${d.listing.priceUsd.toFixed(2)}`,
+      score: d.score,
+      reasons: d.reasons,
+      proxy: d.proxy,
+      endsInMin: d.listing.endsAt
+        ? Math.round((Date.parse(d.listing.endsAt) - Date.now()) / 60_000)
+        : null,
+    };
+  }
+
   app.get<{ Querystring: DealsQuery }>("/api/deals", async (req) => {
     const { market, brand, size, sort, q } = req.query;
     // NB: "all" is a wildcard inside recentDeals — adding it alongside a
@@ -217,31 +268,21 @@ export function startDashboard(
     if (sort === "price") deals = [...deals].sort((a, b) => a.listing.priceUsd - b.listing.priceUsd);
 
     return {
-      deals: deals.slice(0, 80).map((d) => ({
-        title: d.listing.title,
-        url: safeUrl(d.listing.url),
-        imageUrl:
-          d.listing.imageUrl && isAllowedImageUrl(d.listing.imageUrl)
-            ? `/api/thumb?u=${encodeURIComponent(d.listing.imageUrl)}`
-            : null,
-        size: d.listing.size ?? null,
-        condition:
-          d.listing.condition ??
-          (d.listing.title ? extractCondition(d.listing.title) : undefined) ??
-          null,
-        marketLabel: MARKET_LABEL[d.listing.market],
-        priceLabel:
-          d.listing.currency === "JPY"
-            ? `¥${d.listing.price.toLocaleString("en-US")} ≈ $${d.listing.priceUsd.toFixed(0)}`
-            : `$${d.listing.priceUsd.toFixed(2)}`,
-        score: d.score,
-        reasons: d.reasons,
-        proxy: d.proxy,
-        endsInMin: d.listing.endsAt
-          ? Math.round((Date.parse(d.listing.endsAt) - Date.now()) / 60_000)
-          : null,
-      })),
+      deals: deals.slice(0, 80).map(dealItem),
       stats: getStats(),
+    };
+  });
+
+  /** Top finds of the day — same rankFinds ranking the /finds command uses. */
+  app.get("/api/finds", async () => {
+    const pool = store.recentDeals(["all"], 500);
+    return {
+      finds: rankFinds(pool, 24).map((f) => ({
+        ...dealItem(f.deal),
+        rank: f.rank,
+        tier: f.rarity,
+        findLabel: `#${f.rank} ${f.rarity}-tier · ${f.findsScore} pts`,
+      })),
     };
   });
 

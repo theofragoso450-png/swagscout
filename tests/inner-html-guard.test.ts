@@ -34,8 +34,18 @@ const ALLOWED_EXACT = new Set([
 /**
  * Ternaries whose branches are static markup — their embedded value tokens
  * are scanned (and must pass) separately via the nested-token pass.
+ * The !isFind / d.rank guards gate find-section-only markup (rank/tier are
+ * server-computed numbers from rankFinds, never marketplace-controlled).
  */
-const ALLOWED_PREFIXES = ["d.imageUrl ?", "d.size ?", "d.condition ?", "d.endsInMin != null"];
+const ALLOWED_PREFIXES = [
+  "d.imageUrl ?",
+  "d.size ?",
+  "d.condition ?",
+  "d.endsInMin != null",
+  "d.rank != null",
+  "!isFind && d.condition ?",
+  "!isFind && d.endsInMin != null",
+];
 
 export function isUnsafe(token: string): boolean {
   const t = token.trim();
