@@ -20,6 +20,12 @@ function opt(name: string): string | undefined {
   return v || undefined;
 }
 
+function clampHour(raw: string | undefined): number | undefined {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n >= 24 || !Number.isInteger(n)) return undefined;
+  return n;
+}
+
 function parseList(name: string): string[] {
   const v = opt(name);
   if (!v) return [];
@@ -42,6 +48,8 @@ export interface Env {
   playwrightExecutablePath?: string;
   port: number;
   dbPath: string;
+  /** Local hour (0-23) for the daily finds digest; undefined = disabled. */
+  digestHour?: number;
 }
 
 export function loadEnv(): Env {
@@ -65,6 +73,8 @@ export function loadEnv(): Env {
     // Dashboard bind port (and the health endpoint Docker's healthcheck polls).
     port: num("PORT", 3080),
     dbPath: opt("DB_PATH") ?? path.join(process.cwd(), "data", "swagscout.db"),
+    // Daily finds digest: set DIGEST_HOUR_JST=8 for 08:00 JST; unset = off.
+    digestHour: opt("DIGEST_HOUR_JST") === undefined ? undefined : clampHour(opt("DIGEST_HOUR_JST")),
   };
 }
 

@@ -2,6 +2,7 @@ import type { Deal, Listing } from "../types.js";
 import { MARKET_LABEL, MARKET_FLAG } from "../types.js";
 import { getBrand } from "../config/brands.js";
 import { safeUrl } from "../core/safe-url.js";
+import type { FindRank } from "./finds.js";
 
 /** APIEmbed-compatible subset we build manually (no discord.js dependency here). */
 export interface EmbedPayload {
@@ -89,4 +90,19 @@ export function buildDealEmbed(deal: Deal): EmbedPayload {
 
 export function buildDealEmbeds(deals: Deal[]): EmbedPayload[] {
   return deals.map(buildDealEmbed);
+}
+
+/** Deal embed decorated with the find's rank, rarity tier, and finds score. */
+export function buildFindEmbeds(finds: FindRank[]): EmbedPayload[] {
+  return finds.map((f) => {
+    const base = buildDealEmbed(f.deal);
+    return {
+      ...base,
+      fields: [
+        { name: "Find", value: `#${f.rank} · ${f.rarity}-tier`, inline: true },
+        { name: "Finds score", value: String(f.findsScore), inline: true },
+        ...base.fields,
+      ],
+    };
+  });
 }
