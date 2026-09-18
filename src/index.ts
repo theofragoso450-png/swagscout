@@ -2,6 +2,7 @@ import { loadEnv, ensureDbDir } from "./config/env.js";
 import { logger } from "./logger.js";
 import { Store } from "./core/store.js";
 import { recomputeStale } from "./core/recompute.js";
+import { startRetention } from "./core/retention.js";
 import { HttpClient, closeSharedDispatcher } from "./core/http.js";
 import { runShutdown, type Signal } from "./core/shutdown.js";
 import { Poller } from "./core/poller.js";
@@ -50,6 +51,12 @@ async function main(): Promise<void> {
       { remaining: recompute.remaining },
       "stale rows remain — they will be recomputed on next boot",
     );
+  }
+
+  // Nightly retention: prune listings (and their deals) past the window.
+  // RETENTION_DAYS=0 disables; hourlies tick with boot catch-up.
+  if (env.retentionDays > 0) {
+    startRetention(store, { days: env.retentionDays });
   }
 
   const poller = new Poller(

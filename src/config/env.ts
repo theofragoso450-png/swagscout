@@ -26,6 +26,13 @@ function clampHour(raw: string | undefined): number | undefined {
   return n;
 }
 
+/** Retention window in days; RETENTION_DAYS=0 disables. Default 30. */
+function parseRetentionDays(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return 30;
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n >= 0 ? n : 30;
+}
+
 function parseList(name: string): string[] {
   const v = opt(name);
   if (!v) return [];
@@ -50,6 +57,8 @@ export interface Env {
   dbPath: string;
   /** Local hour (0-23) for the daily finds digest; undefined = disabled. */
   digestHour?: number;
+  /** Retention window in days for listings + deals; 0 disables pruning. */
+  retentionDays: number;
 }
 
 export function loadEnv(): Env {
@@ -75,6 +84,8 @@ export function loadEnv(): Env {
     dbPath: opt("DB_PATH") ?? path.join(process.cwd(), "data", "swagscout.db"),
     // Daily finds digest: set DIGEST_HOUR_JST=8 for 08:00 JST; unset = off.
     digestHour: opt("DIGEST_HOUR_JST") === undefined ? undefined : clampHour(opt("DIGEST_HOUR_JST")),
+    // Nightly retention: prune listings (and their deals) older than this.
+    retentionDays: parseRetentionDays(process.env.RETENTION_DAYS),
   };
 }
 

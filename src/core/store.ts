@@ -64,6 +64,8 @@ export class Store {
   private updateDerivedStmt: StatementSync;
   private hasDealStmt: StatementSync;
   private deleteDealsForStmt: StatementSync;
+  private deleteOldListingsStmt: StatementSync;
+  private deleteOrphanDealsStmt: StatementSync;
 
   constructor(dbPath: string) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -164,6 +166,10 @@ export class Store {
     );
     this.hasDealStmt = this.db.prepare("SELECT 1 AS one FROM deals WHERE listingKey = ? LIMIT 1");
     this.deleteDealsForStmt = this.db.prepare("DELETE FROM deals WHERE listingKey = ?");
+    this.deleteOldListingsStmt = this.db.prepare("DELETE FROM listings WHERE updatedAt < ?");
+    this.deleteOrphanDealsStmt = this.db.prepare(
+      "DELETE FROM deals WHERE listingKey NOT IN (SELECT key FROM listings)",
+    );
     this.recentDealsStmt = this.db.prepare(
       `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
@@ -459,6 +465,38 @@ export class Store {
 
   deleteDealsFor(listingKey: string): number {
     return Number(this.deleteDealsForStmt.run(listingKey).changes);
+  }
+
+  // ── retention ────────────────────────────────────────────────────────────
+
+  /**
+   * Delete listings not touched within the window, their deals (deals keep
+   * their own denormalized foundAt, so match on listingKey), and any deals
+   * orphaned by earlier prunes. One transaction — a crash can never leave a
+   * deal pointing at a deleted listing.
+   */
+  pruneBefore(cutoff: string): { listings: number; deals: number } {
+    return this.transaction(() => {
+      const oldListings = this.db
+        .prepare("SELECT key FROM listings WHERE updatedAt < ?")
+        .all(cutoff) as unknown as Array<{ key: string }>;
+      if (oldListings.length === 0) return { listings: 0, deals: 0 };
+      const deleteDealsIn = this.db.prepare(
+        `DELETE FROM deals WHERE listingKey IN (${oldListings.map(() => "?").join(",")})`,
+      );
+      const dChanges = Number(deleteDealsIn.run(...oldListings.map((r) => r.key)).changes);
+      this.deleteOldListingsStmt.run(cutoff);
+      const oChanges = Number(
+        this.deleteOrphanDealsStmt.run().changes, // sweep deals orphaned by earlier prunes
+      );
+      return { listings: oldListings.length, deals: dChanges + oChanges };
+    });
+  }
+
+  /** Merge WAL into the main DB file after bulk deletes keep checkpoints short. */
+  walCheckpoint(): void {
+    // PASSIVE: never blocks readers; no-op when journal_mode is not WAL.
+    this.db.exec("PRAGMA wal_checkpoint(PASSIVE);");
   }
 
   // ── meta ─────────────────────────────────────────────────────────────────
