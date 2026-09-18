@@ -1,0 +1,72 @@
+name: Nightly image smoke
+
+on:
+  schedule:
+    # 04:07 UTC daily — an off-round minute avoids the top-of-hour cron rush.
+    - cron: "7 4 * * *"
+  # Manual trigger: also the way this job was first proven to run (post-merge
+  # dispatch watched green) without waiting a day for the first cron fire.
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t swagscout:smoke .
+
+      # A full boot against real market APIs would make this job flaky (rate
+      # limits, market outages) — the smoke target is the app's own serving
+      # surface, not the markets' availability. An empty DB is fine: /api/deals
+      # and /api/finds must return well-shaped 200s either way.
+      - name: Boot container (fresh empty data volume)
+        run: docker run -d --name smoke -p 3080:3080 -v smoke-data:/app/data swagscout:smoke
+
+      - name: Probe the serving surface
+        run: |
+          set -eu
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3080/ 2>/dev/null; then break; fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::container never answered on / within 30s"
+              docker logs smoke | tail -50
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # / — the dashboard page: HTML with the expected shell
+          BODY=$(curl -fsS http://127.0.0.1:3080/)
+          case "$BODY" in
+            *"SwagScout"*) : ;;
+            *) echo "::error::/ missing SwagScout markup"; echo "$BODY" | head -5; exit 1 ;;
+          esac
+
+          # /api/deals — 200 + {deals:[],stats} shape even on an empty DB
+          DEALS=$(curl -fsS http://127.0.0.1:3080/api/deals)
+          echo "$DEALS" | node -e "
+            let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
+              const j=JSON.parse(d);
+              if(!Array.isArray(j.deals)) { console.error('deals not an array'); process.exit(1); }
+              if(j.deals.length>0 && !j.deals[0].title) { console.error('deal rows lack title'); process.exit(1); }
+              if(typeof j.stats!=='string') { console.error('stats not a string'); process.exit(1); }
+              console.log('api/deals OK:', j.deals.length, 'deals');
+            })"
+
+          # /api/finds — 200 + {finds:[]} shape even on an empty DB
+          FINDS=$(curl -fsS http://127.0.0.1:3080/api/finds)
+          echo "$FINDS" | node -e "
+            let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
+              const j=JSON.parse(d);
+              if(!Array.isArray(j.finds)) { console.error('finds not an array'); process.exit(1); }
+              console.log('api/finds OK:', j.finds.length, 'finds');
+            })"
+
+          echo "smoke probes passed"
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f smoke >/dev/null 2>&1 || true; docker volume rm smoke-data >/dev/null 2>&1 || true
