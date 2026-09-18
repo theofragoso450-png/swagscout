@@ -6,7 +6,7 @@ import { THRESHOLD_RULES } from "../config/rules.js";
 import type { Deal } from "../types.js";
 import { fetchThumb, isAllowedImageUrl } from "./thumbs.js";
 import { extractCondition } from "../core/normalize.js";
-import { rankFinds } from "../notify/finds.js";
+import { rankFinds, findsPool } from "../notify/finds.js";
 
 const CONDITION_LABEL: Record<string, string> = {
   new: "New",
@@ -254,7 +254,7 @@ export function startDashboard(
     // NB: "all" is a wildcard inside recentDeals — adding it alongside a
     // brand key would make the brand filter a no-op. The third arg scopes
     // the SQL to the brand so niche brands aren't starved by newer deals.
-    let deals: Deal[] = store.recentDeals(brand ? [brand] : ["all"], 200, brand);
+    let deals: Deal[] = store.recentDeals(brand ? [brand] : ["all"], 200, { brand });
 
     // Bot-matching semantics: exact, case-insensitive; listings without a
     // size never match a size-filtered view (see notify/matching.ts).
@@ -275,9 +275,9 @@ export function startDashboard(
 
   /** Top finds of the day — same rankFinds ranking the /finds command uses. */
   app.get("/api/finds", async () => {
-    const pool = store.recentDeals(["all"], 500);
+    const pool = findsPool(Date.now());
     return {
-      finds: rankFinds(pool, 24).map((f) => ({
+      finds: rankFinds(store.recentDeals(["all"], pool.limit, { since: pool.since }), 24).map((f) => ({
         ...dealItem(f.deal),
         rank: f.rank,
         tier: f.rarity,

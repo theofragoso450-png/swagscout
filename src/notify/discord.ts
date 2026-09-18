@@ -14,7 +14,7 @@ import type { Store } from "../core/store.js";
 import { logger } from "../logger.js";
 import { buildDealEmbed, buildDealEmbeds, buildFindEmbeds, type EmbedPayload } from "./embeds.js";
 import { dealMatchesSubscription } from "./matching.js";
-import { rankFinds } from "./finds.js";
+import { rankFinds, findsPool } from "./finds.js";
 import { digestTick } from "./digest.js";
 
 export interface NotifierEnv {
@@ -235,8 +235,8 @@ export class DiscordNotifier {
 
   private async cmdFinds(i: ChatInputCommandInteraction): Promise<void> {
     const hours = Math.min(Math.max(i.options.getInteger("hours") ?? 24, 1), 168);
-    const pool = this.store.recentDeals(["all"], 500);
-    const finds = rankFinds(pool, hours);
+    const pool = findsPool(Date.now(), hours);
+    const finds = rankFinds(this.store.recentDeals(["all"], pool.limit, { since: pool.since }), hours);
     if (finds.length === 0) {
       await i.reply({
         content:
