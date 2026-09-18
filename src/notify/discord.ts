@@ -12,8 +12,9 @@ import { ALL_MARKETS, MARKET_LABEL } from "../types.js";
 import { BRANDS } from "../config/brands.js";
 import type { Store } from "../core/store.js";
 import { logger } from "../logger.js";
-import { buildDealEmbeds } from "./embeds.js";
+import { buildDealEmbed, buildDealEmbeds, type EmbedPayload } from "./embeds.js";
 import { dealMatchesSubscription } from "./matching.js";
+import { rankFinds } from "./finds.js";
 
 export interface NotifierEnv {
   token?: string;
@@ -112,6 +113,12 @@ export class DiscordNotifier {
         .addIntegerOption((o) =>
           o.setName("limit").setDescription("Max deals to show (default 5)").setRequired(false),
         ),
+      new SlashCommandBuilder()
+        .setName("finds")
+        .setDescription("Top 10 finds of the day — rarest comp-backed deals")
+        .addIntegerOption((o) =>
+          o.setName("hours").setDescription("Look-back window in hours (default 24)").setRequired(false),
+        ),
     ].map((c) => c.toJSON());
 
     const rest = new REST({ version: "10" }).setToken(appToken);
@@ -131,6 +138,8 @@ export class DiscordNotifier {
         return this.cmdStatus(i);
       case "deals":
         return this.cmdDeals(i);
+      case "finds":
+        return this.cmdFinds(i);
     }
   }
 
@@ -206,6 +215,33 @@ export class DiscordNotifier {
       return;
     }
     await i.reply({ embeds: buildDealEmbeds(deals), ephemeral: true });
+  }
+
+  private async cmdFinds(i: ChatInputCommandInteraction): Promise<void> {
+    const hours = Math.min(Math.max(i.options.getInteger("hours") ?? 24, 1), 168);
+    const pool = this.store.recentDeals(["all"], 500);
+    const finds = rankFinds(pool, hours);
+    if (finds.length === 0) {
+      await i.reply({
+        content:
+          `No comp-backed finds in the last ${hours}h. ` +
+          "Deals need cross-market comps to rank — try /deals for the latest regardless.",
+        ephemeral: true,
+      });
+      return;
+    }
+    const embeds: EmbedPayload[] = finds.map((f) => {
+      const base = buildDealEmbed(f.deal);
+      return {
+        ...base,
+        fields: [
+          { name: "Find", value: `#${f.rank} · ${f.rarity}-tier`, inline: true },
+          { name: "Finds score", value: String(f.findsScore), inline: true },
+          ...base.fields,
+        ],
+      };
+    });
+    await i.reply({ embeds, ephemeral: true });
   }
 
   // ── alert routing ────────────────────────────────────────────────────────
