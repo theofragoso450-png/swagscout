@@ -52,6 +52,7 @@ const PAGE = `
   .deal { border:1px solid #21262d; border-radius:12px; padding:14px 16px; margin-bottom:12px; display:flex; gap:14px; background:#161b22; transition:border-color .15s, transform .15s; }
   .deal:hover { border-color:#3d444d; transform:translateY(-1px); }
   .deal img { width:76px; height:76px; object-fit:cover; border-radius:10px; background:#21262d; flex:none; }
+  .deal img.imgph { background:linear-gradient(135deg,#1c2129,#262c36); }
   .imgph { display:inline-block; width:76px; height:76px; border-radius:10px; flex:none; background:linear-gradient(135deg,#1c2129,#262c36); border:1px dashed #30363d; }
   .meta { flex:1; min-width:0; }
   .title { font-weight:600; font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -179,7 +180,9 @@ const PAGE = `
   const dot = document.getElementById("dot");
   function markLive(ok) { if (!dot) return; dot.classList.toggle("on", ok); dot.classList.toggle("err", !ok); }
   function clearFilters() {
-    for (const id of ["market", "brand", "size", "sort"]) document.getElementById(id).value = "";
+    for (const id of ["market", "brand", "size"]) document.getElementById(id).value = "";
+    // sort has no empty option — resetting to "" would blank the dropdown.
+    document.getElementById("sort").value = "found";
     document.getElementById("q").value = "";
     refresh();
   }
