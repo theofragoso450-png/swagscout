@@ -81,6 +81,23 @@ describe("evaluateThreshold", () => {
   });
 });
 
+describe("evaluateThreshold — ys", () => {
+  it("fires under the $150 cap", () => {
+    const d = evaluateThreshold({ brandKey: "ys", title: "Y's ワイズ チュニック", priceUsd: 19 });
+    expect(d).toBeDefined();
+    expect(d).toContain("≤ $150");
+    expect(d).toContain("Y's (Yohji women's)");
+  });
+
+  it("stays quiet above the cap", () => {
+    expect(evaluateThreshold({ brandKey: "ys", title: "Y's ワイズ コート", priceUsd: 180 })).toBeUndefined();
+  });
+
+  it("respects exclude terms (reps)", () => {
+    expect(evaluateThreshold({ brandKey: "ys", title: "Y's replica one-piece", priceUsd: 50 })).toBeUndefined();
+  });
+});
+
 describe("scoreDeal", () => {
   const listing = normalizeListing({
     market: "yahoo",
