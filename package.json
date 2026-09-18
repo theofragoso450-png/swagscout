@@ -14,7 +14,8 @@
     "smoke": "tsx src/smoke.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke:drift": "tsx src/smoke-drift.ts"
+    "smoke:drift": "tsx src/smoke-drift.ts",
+    "watch:fuzzy": "tsx src/watch-fuzzy.ts"
   },
   "dependencies": {
     "cheerio": "^1.0.0",
