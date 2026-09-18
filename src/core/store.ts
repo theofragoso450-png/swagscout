@@ -22,6 +22,8 @@ export interface StoredListing {
   endsAt: string | null;
   foundAt: string;
   updatedAt: string;
+  /** Null while the listing appears in complete poll rounds; set when last seen. */
+  missingSince: string | null;
 }
 
 export interface Subscription {
@@ -66,6 +68,10 @@ export class Store {
   private deleteDealsForStmt: StatementSync;
   private deleteOldListingsStmt: StatementSync;
   private deleteOrphanDealsStmt: StatementSync;
+  private markMissingStmt: StatementSync;
+  private clearMissingForStmt: StatementSync;
+  private clearAllMissingStmt: StatementSync;
+  private countMissingStmt: StatementSync;
 
   constructor(dbPath: string) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -95,6 +101,12 @@ export class Store {
     const dealCols = this.db.prepare("PRAGMA table_info(deals)").all() as Array<{ name: string }>;
     if (!dealCols.some((c) => c.name === "pipelineVersion")) {
       this.db.exec("ALTER TABLE deals ADD COLUMN pipelineVersion INTEGER NOT NULL DEFAULT 0");
+    }
+    // Sold-velocity tracking: when a listing is last seen, and since when it
+    // has been missing from complete poll rounds of its market. Operational
+    // state (not a derived value) — deliberately no PIPELINE_VERSION bump.
+    if (!cols.some((c) => c.name === "missingSince")) {
+      this.db.exec("ALTER TABLE listings ADD COLUMN missingSince TEXT");
     }
 
     this.hasStmt = this.db.prepare(
@@ -170,24 +182,34 @@ export class Store {
     this.deleteOrphanDealsStmt = this.db.prepare(
       "DELETE FROM deals WHERE listingKey NOT IN (SELECT key FROM listings)",
     );
+    this.markMissingStmt = this.db.prepare(
+      "UPDATE listings SET missingSince = ? WHERE key = ? AND market = ? AND missingSince IS NULL",
+    );
+    this.clearMissingForStmt = this.db.prepare(
+      "UPDATE listings SET missingSince = NULL WHERE key = ?",
+    );
+    this.clearAllMissingStmt = this.db.prepare("UPDATE listings SET missingSince = NULL");
+    this.countMissingStmt = this.db.prepare(
+      "SELECT COUNT(*) AS c FROM listings WHERE missingSince IS NOT NULL",
+    );
     this.recentDealsStmt = this.db.prepare(
-      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
+      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition, l.missingSince AS missingSince
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        ORDER BY d.foundAt DESC LIMIT ?`,
     );
     this.recentDealsByBrandStmt = this.db.prepare(
-      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
+      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition, l.missingSince AS missingSince
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        WHERE d.brandKey = ? ORDER BY d.foundAt DESC LIMIT ?`,
     );
     this.recentDealsSinceStmt = this.db.prepare(
-      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
+      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition, l.missingSince AS missingSince
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        WHERE d.foundAt >= ?
        ORDER BY d.foundAt DESC LIMIT ?`,
     );
     this.recentDealsByBrandSinceStmt = this.db.prepare(
-      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition
+      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition, l.missingSince AS missingSince
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        WHERE d.brandKey = ? AND d.foundAt >= ? ORDER BY d.foundAt DESC LIMIT ?`,
     );
@@ -373,6 +395,7 @@ export class Store {
       imageUrl: string | null;
       size: string | null;
       condition: string | null;
+      missingSince: string | null;
     };
     const rows = (
       brand !== undefined && since !== undefined
@@ -401,6 +424,8 @@ export class Store {
           imageUrl: r.imageUrl ?? undefined,
           size: r.size ?? undefined,
           condition: r.condition ?? undefined,
+          // Attached for the sold-velocity surfaces; undefined ≡ live row.
+          missingSince: r.missingSince ?? undefined,
         },
         proxy: proxyLinks({
           id: r.marketId,
@@ -497,6 +522,64 @@ export class Store {
   walCheckpoint(): void {
     // PASSIVE: never blocks readers; no-op when journal_mode is not WAL.
     this.db.exec("PRAGMA wal_checkpoint(PASSIVE);");
+  }
+
+  // ── sold-velocity transitions ──────────────────────────────────────────────
+
+  /**
+   * Mark every currently-missing listing of `market` as missing since `at`.
+   * Idempotent: rows already marked keep their original timestamp (the
+   * missing-since must reflect the FIRST disappearance, not the latest tick).
+   * Returns how many rows were newly marked.
+   */
+  markMissing(market: MarketId, at: string, keys: string[]): number {
+    if (keys.length === 0) return 0;
+    return this.transaction(() => {
+      let marked = 0;
+      for (const key of keys) {
+        marked += Number(this.markMissingStmt.run(at, key, market).changes);
+      }
+      return marked;
+    });
+  }
+
+  /** A previously-missing listing of `market` was seen again — clear it. */
+  clearMissing(key: string): void {
+    this.clearMissingForStmt.run(key);
+  }
+
+  /**
+   * Record absent-since for keys that just went missing. Idempotent: rows
+   * already missing keep their original timestamp (the label must age from
+   * the FIRST absence, not churn each cycle). Reappearing rows are cleared
+   * by clearMissing on sighting, not here.
+   */
+  applyAbsences(market: MarketId, at: string, absentKeys: string[]): number {
+    let marked = 0;
+    for (const key of absentKeys) {
+      marked += Number(this.markMissingStmt.run(at, key, market).changes);
+    }
+    return marked;
+  }
+
+  /** Stored rows for the given brand keys (coverage-scoped absence checks). */
+  listingsForBrands(brandKeys: string[]): StoredListing[] {
+    if (brandKeys.length === 0) return [];
+    const ph = brandKeys.map(() => "?").join(",");
+    return this.db
+      .prepare(`SELECT * FROM listings WHERE brandKey IN (${ph})`)
+      .all(...brandKeys) as unknown as StoredListing[];
+  }
+
+  /** Total currently-missing rows (test/ops surface). */
+  countMissing(): number {
+    const row = this.countMissingStmt.get() as unknown as { c: number };
+    return row.c;
+  }
+
+  /** Test seam: forget every transition (fresh start for a scenario). */
+  resetMissing(): void {
+    this.clearAllMissingStmt.run();
   }
 
   // ── meta ─────────────────────────────────────────────────────────────────

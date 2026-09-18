@@ -18,6 +18,17 @@ const CONDITION_LABEL: Record<string, string> = {
  * Marketplace-controlled URLs must never reach the page with an executable
  * scheme; non-http(s) or unparseable values are nulled and render inert ("#").
  */
+/** Shared human duration label (e.g. "3d 4h", "52m") for wire fields. */
+function fmtDuration(mins: number): string {
+  if (!Number.isFinite(mins) || mins < 0) return "";
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
 function safeUrl(u: string | null | undefined): string | null {
   if (!u) return null;
   try {
@@ -66,6 +77,7 @@ const PAGE = `
   .badge.cond-new { color:#3fb950; }
   .badge.cond-like-new { color:#d29922; }
   .badge.cond-used { color:#8b949e; }
+  .badge.miss { color:#8b949e; font-style:italic; }
   .reasons { font-size:12px; color:#d29922; margin-top:4px; }
   .proxies a { color:#58a6ff; font-size:12px; margin-right:8px; text-decoration:none; }
   .empty { color:#8b949e; padding:40px 0; text-align:center; font-size:14px; position:relative; }
@@ -214,6 +226,7 @@ const PAGE = `
           <span class="price">\${d.priceLabel}</span>
           <span class="score">score \${d.score}</span>
           \${!isFind && d.endsInMin != null && d.endsInMin > 0 ? \`<span>ends in \${fmtDur(d.endsInMin)}</span>\` : ""}
+          \${!isFind && d.missingForLabel ? \`<span class="badge miss">Sold or delisted \${escapeHtml(d.missingForLabel)}</span>\` : ""}
         </div>
         <div class="reasons">\${reasons}</div>
         <div class="proxies">\${proxies}</div>
@@ -288,6 +301,10 @@ export function startDashboard(
           : `$${d.listing.priceUsd.toFixed(2)}`,
       score: d.score,
       reasons: d.reasons,
+      // Honest sold-velocity: absence ≠ sale, so the label says both.
+      missingForLabel: d.listing.missingSince
+        ? fmtDuration(Math.round((Date.now() - Date.parse(d.listing.missingSince)) / 60_000)) || null
+        : null,
       proxy: d.proxy,
       endsInMin: d.listing.endsAt
         ? Math.round((Date.parse(d.listing.endsAt) - Date.now()) / 60_000)

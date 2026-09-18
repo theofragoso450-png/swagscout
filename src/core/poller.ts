@@ -19,6 +19,12 @@ interface MarketRuntime {
   consecutiveFailures: number;
   openUntil: number; // circuit breaker open until this timestamp
   lastIndex: number;
+  /** One query cycle: every store key any succeeded query returned. */
+  roundSeen: Set<string>;
+  /** Brand keys touched by any succeeded query this cycle. */
+  roundBrands: Set<string>;
+  /** Per brand: search terms that completed a short (complete) page. */
+  roundDoneTerms: Map<string, Set<string>>;
 }
 
 const MAX_FAILURES_BEFORE_BREAKER = 5;
@@ -46,6 +52,9 @@ export class Poller {
         consecutiveFailures: 0,
         openUntil: 0,
         lastIndex: 0,
+        roundSeen: new Set(),
+        roundBrands: new Set(),
+        roundDoneTerms: new Map(),
       });
     }
   }
@@ -126,6 +135,15 @@ export class Poller {
     this.timers.clear();
   }
 
+  /** Brand keys whose searchTerms include `query` — the query's coverage. */
+  private brandsForQuery(query: string): string[] {
+    const hits: string[] = [];
+    for (const b of BRAND_CACHE.values()) {
+      if (b.searchTerms.includes(query)) hits.push(b.key);
+    }
+    return hits;
+  }
+
   /** Poll one market once (also used by smoke tests). */
   async pollMarket(market: MarketId): Promise<PollResult> {
     const rt = this.runtimes.get(market);
@@ -141,10 +159,12 @@ export class Poller {
     let newListings = 0;
     let priceDrops = 0;
     const deals: Deal[] = [];
+    let query: string | undefined;
 
     try {
       // rotate through queries, one brand step per tick to stay polite
-      const query = queries[rt.lastIndex % queries.length] ?? queries[0];
+      query = queries[rt.lastIndex % queries.length] ?? queries[0];
+      const wrapped = rt.lastIndex >= queries.length - 1; // this tick exhausts the cycle
       rt.lastIndex = (rt.lastIndex + 1) % Math.max(queries.length, 1);
 
       if (query) {
@@ -152,8 +172,31 @@ export class Poller {
         fetched = listings.length;
         await sleep(50); // tiny breather before db writes
 
+        // Sold-velocity bookkeeping: this query SUCCEEDED, so what it did and
+        // did not return is signal. Coverage is per brand-term: a brand's
+        // absence data is only trusted once EVERY search term of that brand
+        // completed a short (complete) page within one query cycle.
+        for (const b of this.brandsForQuery(query)) {
+          rt.roundBrands.add(b);
+          let done = rt.roundDoneTerms.get(b);
+          if (!done) rt.roundDoneTerms.set(b, (done = new Set()));
+          // Short page = complete result set for this term. A full page
+          // invalidates any earlier completeness — coverage must reflect the
+          // term's most recent observation, not history.
+          if (fetched < 50) done.add(query);
+          else done.delete(query);
+        }
+        const newlyMissing: string[] = [];
+
         for (const listing of listings) {
+          const key = `${listing.market}:${listing.id}`;
+          rt.roundSeen.add(key);
+
           const existing = this.store.get(listing.market, listing.id);
+          if (existing?.missingSince) {
+            this.store.clearMissing(key);
+            logger.debug({ key }, "listing reappeared — missing state cleared");
+          }
           if (!existing) {
             this.store.upsertListing(listing);
             newListings++;
@@ -185,11 +228,42 @@ export class Poller {
             }
           }
         }
+
+        // Cycle wrap: every search term of the market just got its turn. For
+        // brands whose terms ALL completed short pages, stored rows absent
+        // from this cycle's seen-set have genuinely gone missing — record the
+        // transition. Failed or full-page terms leave their brand uncovered,
+        // so pagination gaps, partial fetches, and API hiccups never mark.
+        if (wrapped) {
+          const covered = [...rt.roundBrands].filter((b) => {
+            const terms = BRAND_CACHE.get(b)?.searchTerms ?? [];
+            const done = rt.roundDoneTerms.get(b);
+            return terms.length > 0 && terms.every((t) => done?.has(t));
+          });
+          if (covered.length > 0) {
+            const stored = this.store.listingsForBrands(covered);
+            const absent = stored.filter((l) => !rt.roundSeen.has(l.key)).map((l) => l.key);
+            this.store.applyAbsences(market, new Date().toISOString(), absent);
+            logger.info(
+              { market: MARKET_LABEL[market], newlyMissing: absent.length, brands: covered },
+              "sold-or-gone transitions recorded",
+            );
+          }
+          rt.roundSeen.clear();
+          rt.roundBrands.clear();
+          rt.roundDoneTerms.clear();
+        }
       }
 
       rt.consecutiveFailures = 0;
     } catch (err) {
       rt.consecutiveFailures++;
+      // The failed term's outcome is now unknown — drop its coverage flag so
+      // its brand stays uncovered until the term completes a short page again.
+      // Other terms' fresh observations stay valid.
+      if (query) {
+        for (const b of this.brandsForQuery(query)) rt.roundDoneTerms.get(b)?.delete(query);
+      }
       if (rt.consecutiveFailures >= MAX_FAILURES_BEFORE_BREAKER) {
         rt.openUntil = Date.now() + BREAKER_OPEN_MS;
         rt.consecutiveFailures = 0;

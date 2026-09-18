@@ -45,6 +45,8 @@ const ALLOWED_PREFIXES = [
   "d.rank != null",
   "!isFind && d.condition ?",
   "!isFind && d.endsInMin != null",
+  // missingForLabel: server-composed via fmtDuration from the store's ISO stamp
+  "!isFind && d.missingForLabel ?",
 ];
 
 export function isUnsafe(token: string): boolean {

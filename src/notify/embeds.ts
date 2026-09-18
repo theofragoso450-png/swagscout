@@ -31,6 +31,15 @@ function fmtUsd(n: number): string {
   return `$${n.toFixed(2).replace(/\.00$/, "")}`;
 }
 
+/** Honesty label for a missing listing: absence is not proof of sale. */
+function missingForLabel(mins: number): string {
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  const span = d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return `Sold or delisted · ${span} ago`;
+}
+
 const FIELD_MAX = 1024; // Discord embed field value cap
 
 /** Marketplace-controlled text must not render as markdown inside fields. */
@@ -71,6 +80,12 @@ export function buildDealEmbed(deal: Deal): EmbedPayload {
     const ts = Math.floor(Date.parse(l.endsAt) / 1000);
     if (Number.isFinite(ts) && ts > Date.now() / 1000) {
       fields.push({ name: "Auction ends", value: `<t:${ts}:R>`, inline: true });
+    }
+  }
+  if (l.missingSince) {
+    const mins = Math.round((Date.now() - Date.parse(l.missingSince)) / 60_000);
+    if (Number.isFinite(mins) && mins >= 0) {
+      fields.push({ name: "Status", value: bounded(missingForLabel(mins), FIELD_MAX), inline: true });
     }
   }
   fields.push({ name: "Why it's a deal", value: reasons.slice(0, 1000) });
