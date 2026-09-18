@@ -12,9 +12,10 @@ import { ALL_MARKETS, MARKET_LABEL } from "../types.js";
 import { BRANDS } from "../config/brands.js";
 import type { Store } from "../core/store.js";
 import { logger } from "../logger.js";
-import { buildDealEmbed, buildDealEmbeds, type EmbedPayload } from "./embeds.js";
+import { buildDealEmbed, buildDealEmbeds, buildFindEmbeds, type EmbedPayload } from "./embeds.js";
 import { dealMatchesSubscription } from "./matching.js";
 import { rankFinds } from "./finds.js";
+import { digestTick } from "./digest.js";
 
 export interface NotifierEnv {
   token?: string;
@@ -40,6 +41,21 @@ export class DiscordNotifier {
     private readonly env: NotifierEnv,
   ) {
     this.allowed = new Set(env.allowedChannels);
+  }
+
+  /** Start the daily finds digest scheduler (bot mode only). */
+  startDigest(hour = 8): void {
+    const runTick = (): void => {
+      void digestTick(
+        Date.now(),
+        this.store,
+        async (embeds, channels) => this.sendEmbedsToChannels(embeds, channels),
+        hour,
+      ).catch((err) => logger.error({ err }, "finds digest failed"));
+    };
+    const timer = setInterval(runTick, 60_000);
+    timer.unref?.();
+    runTick(); // catch-up: a boot after today's slot still delivers it
   }
 
   async start(): Promise<void> {
@@ -230,17 +246,7 @@ export class DiscordNotifier {
       });
       return;
     }
-    const embeds: EmbedPayload[] = finds.map((f) => {
-      const base = buildDealEmbed(f.deal);
-      return {
-        ...base,
-        fields: [
-          { name: "Find", value: `#${f.rank} · ${f.rarity}-tier`, inline: true },
-          { name: "Finds score", value: String(f.findsScore), inline: true },
-          ...base.fields,
-        ],
-      };
-    });
+    const embeds = buildFindEmbeds(finds);
     await i.reply({ embeds, ephemeral: true });
   }
 
@@ -265,21 +271,27 @@ export class DiscordNotifier {
     }
   }
 
+  private async sendEmbedsToChannels(embeds: EmbedPayload[], channels: string[]): Promise<string[]> {
+    const sent: string[] = [];
+    for (const channelId of channels) {
+      if (!this.channelAllowed(channelId)) continue;
+      try {
+        const channel = await this.client!.channels.fetch(channelId);
+        if (channel && channel.isTextBased() && "send" in channel) {
+          await channel.send({ embeds });
+          sent.push(channelId);
+        }
+      } catch (err) {
+        logger.debug({ err, channelId }, "failed to send to channel");
+      }
+    }
+    return sent;
+  }
+
   private async routeDeal(deal: Deal): Promise<void> {
     const subs = this.store.listSubscriptions().filter((s) => dealMatchesSubscription(deal, s));
     const embeds = buildDealEmbeds([deal]);
-
-    for (const sub of subs) {
-      if (!this.channelAllowed(sub.channelId)) continue;
-      try {
-        const channel = await this.client!.channels.fetch(sub.channelId);
-        if (channel && channel.isTextBased() && "send" in channel) {
-          await channel.send({ embeds });
-        }
-      } catch (err) {
-        logger.debug({ err, channelId: sub.channelId }, "failed to send to channel");
-      }
-    }
+    await this.sendEmbedsToChannels(embeds, subs.map((s) => s.channelId));
   }
 
   private async sendWebhook(

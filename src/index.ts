@@ -35,6 +35,11 @@ async function main(): Promise<void> {
     allowedChannels: env.discordAllowedChannels,
   });
 
+  // Daily finds digest — only meaningful with a bot client that can post.
+  if (env.digestHour !== undefined && env.discordToken) {
+    notifier.startDigest(env.digestHour);
+  }
+
   const poller = new Poller(
     store,
     adapters,

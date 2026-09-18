@@ -48,7 +48,9 @@ Requirements: **Node 23+** (uses the built-in `node:sqlite` — no native compil
 
 **`/finds` ranks the day's top 10 finds:** only comp-backed deals (a cross-market median they sit below) can rank, scored on rarity — how far below the median and how many listings back it — plus price significance (a 50% cut on a $2,000 coat outranks one on a $60 shirt). Each result shows a finds score and rarity tier (S/A/B/C); `hours: <n>` widens the look-back window (1–168h, default 24).
 
-Webhook-only mode also works: set `DISCORD_WEBHOOK_URL` instead of a token (alerts only, no commands).
+**Daily finds digest:** with a bot token set, the bot posts the top 10 finds of the last 24h to every subscribed channel once a day — `DIGEST_HOUR_JST=8` schedules it at 08:00 JST (any hour 0–23 works; unset disables). Restarts never double-post (the sent slot is recorded in the store), and a boot after the hour still delivers that morning's digest.
+
+Webhook-only mode also works: set `DISCORD_WEBHOOK_URL` instead of a token (alerts only, no commands — no digest, since there are no subscriptions).
 
 ### eBay keys
 
