@@ -29,6 +29,12 @@ function fmtDuration(mins: number): string {
   return `${m}m`;
 }
 
+/** Marketplace titles are frequently Japanese; a ja hint lets screen readers
+ *  switch voice instead of reading kana/kanji with an English one. */
+function detectTitleLang(title: string): string | null {
+  return /[\u3040-\u30ff\u4e00-\u9fff]/.test(title) ? "ja" : null;
+}
+
 function safeUrl(u: string | null | undefined): string | null {
   if (!u) return null;
   try {
@@ -41,7 +47,7 @@ function safeUrl(u: string | null | undefined): string | null {
 
 const PAGE = `
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>SwagScout — archive fashion deals</title>
@@ -95,6 +101,7 @@ const PAGE = `
   .dot { width:8px; height:8px; border-radius:999px; background:#30363d; display:inline-block; margin-right:6px; transition:background .4s, box-shadow .4s; }
   .dot.on { background:#3fb950; box-shadow:0 0 6px rgba(63,185,80,.5); }
   .dot.err { background:#d29922; box-shadow:0 0 6px rgba(210,153,34,.5); }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 </style>
 </head>
 <body>
@@ -103,18 +110,18 @@ const PAGE = `
     <h1>Swag<span>Scout</span></h1>
     <div class="tagline">Live cross-market scout for archive fashion deals</div>
   </div>
-  <div class="sub"><span id="dot"></span><span id="stats">loading…</span></div>
+  <div class="sub"><span id="dot" aria-hidden="true"></span><span id="live" class="sr-only" role="status" aria-live="polite"></span><span id="stats">loading…</span></div>
 </header>
 <div class="bar">
-  <select id="market"><option value="">All markets</option></select>
-  <select id="brand"><option value="">All brands</option></select>
-  <select id="size"><option value="">All sizes</option></select>
-  <select id="sort">
+  <select id="market" aria-label="Market"><option value="">All markets</option></select>
+  <select id="brand" aria-label="Brand"><option value="">All brands</option></select>
+  <select id="size" aria-label="Size"><option value="">All sizes</option></select>
+  <select id="sort" aria-label="Sort by">
     <option value="found">Newest</option>
     <option value="score">Best score</option>
     <option value="price">Lowest price</option>
   </select>
-  <input id="q" type="search" placeholder="Filter titles…">
+  <input id="q" type="search" aria-label="Filter titles" placeholder="Filter titles…">
 </div>
 <section id="finds">
   <h2 class="finds-head">Finds of the day</h2>
@@ -193,7 +200,13 @@ const PAGE = `
     document.getElementById("stats").textContent = data.stats;
   }
   const dot = document.getElementById("dot");
-  function markLive(ok) { if (!dot) return; dot.classList.toggle("on", ok); dot.classList.toggle("err", !ok); }
+  const live = document.getElementById("live");
+  function markLive(ok) {
+    if (!dot) return;
+    dot.classList.toggle("on", ok);
+    dot.classList.toggle("err", !ok);
+    if (live) live.textContent = ok ? "Live — feed updated" : "Feed fetch failed — retrying";
+  }
   function clearFilters() {
     for (const id of ["market", "brand", "size"]) document.getElementById(id).value = "";
     // sort has no empty option — resetting to "" would blank the dropdown.
@@ -218,7 +231,7 @@ const PAGE = `
     return \`<div class="deal">
       \${d.imageUrl ? \`<img src="\${escapeHtml(safeUrl(d.imageUrl))}" loading="lazy" onerror="this.classList.add('imgph');this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img class='img imgph' src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' alt=''>"}
       <div class="meta">
-        <div class="title">\${d.rank != null ? \`<span class="tier tier-\${escapeHtml(d.tier)}">\${escapeHtml(d.findLabel)}</span>\` : ""}<a href="\${escapeHtml(safeUrl(d.url))}" target="_blank">\${escapeHtml(d.title)}</a></div>
+        <div class="title">\${d.rank != null ? \`<span class="tier tier-\${escapeHtml(d.tier)}">\${escapeHtml(d.findLabel)}</span>\` : ""}<a href="\${escapeHtml(safeUrl(d.url))}" target="_blank" lang="\${escapeHtml(d.titleLang || "")}">\${escapeHtml(d.title)}</a></div>
         <div class="row">
           <span class="badge">\${escapeHtml(d.marketLabel)}</span>
           \${d.size ? \`<span class="badge size">\${escapeHtml(d.size)}</span>\` : ""}
@@ -284,6 +297,7 @@ export function startDashboard(
   function dealItem(d: Deal) {
     return {
       title: d.listing.title,
+      titleLang: detectTitleLang(d.listing.title),
       url: safeUrl(d.listing.url),
       imageUrl:
         d.listing.imageUrl && isAllowedImageUrl(d.listing.imageUrl)
