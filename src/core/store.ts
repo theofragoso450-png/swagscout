@@ -4,6 +4,29 @@ import path from "node:path";
 import type { Deal, Listing, MarketId } from "../types.js";
 import { proxyLinks } from "../proxy/links.js";
 import { PIPELINE_VERSION } from "./pipeline.js";
+import { fxRatesSnapshot, jpyUsdRate, round2, usdFrom } from "./fx.js";
+
+/**
+ * Re-derive a row's USD value from its native price at a pinned rate set.
+ *
+ * The stored `priceUsd` is the rate that was in force at INGEST, so it is a
+ * mix of vintages the moment rates move: a comp window spanning a refresh would
+ * median values converted at different rates, and a price band would bucket on
+ * a stale number. Deriving at read time from the stored native price + currency
+ * (both always present) puts every value in a response on one rate. The stored
+ * column stays as the ingest record and as the fallback for a currency we
+ * cannot convert.
+ */
+function withCurrentUsd<T extends { price: number; currency: string; priceUsd: number }>(
+  row: T,
+  rates: Readonly<Record<string, number>>,
+): T {
+  try {
+    return { ...row, priceUsd: round2(usdFrom(row.price, row.currency, rates)) };
+  } catch {
+    return row;
+  }
+}
 
 export interface StoredListing {
   key: string; // `${market}:${id}`
@@ -24,6 +47,10 @@ export interface StoredListing {
   updatedAt: string;
   /** Null while the listing appears in complete poll rounds; set when last seen. */
   missingSince: string | null;
+  /** The currency factor baked into `priceUsd` at ingest (null = pre-column).
+   *  Kept for auditing which rate vintage a row was written under; reads do not
+   *  trust it. */
+  fxRate: number | null;
 }
 
 export interface Subscription {
@@ -108,6 +135,12 @@ export class Store {
     if (!cols.some((c) => c.name === "missingSince")) {
       this.db.exec("ALTER TABLE listings ADD COLUMN missingSince TEXT");
     }
+    // The currency factor baked into priceUsd at ingest. Audit-only: reads
+    // re-derive from native price so every value in a response shares the rate
+    // in force now. Existing rows keep NULL ("vintage unknown").
+    if (!cols.some((c) => c.name === "fxRate")) {
+      this.db.exec("ALTER TABLE listings ADD COLUMN fxRate REAL");
+    }
 
     this.hasStmt = this.db.prepare(
       "SELECT 1 AS one FROM listings WHERE market = ? AND marketId = ? LIMIT 1",
@@ -118,10 +151,10 @@ export class Store {
     this.upsertListingStmt = this.db.prepare(`
       INSERT INTO listings
         (key, market, marketId, title, brandKey, item, size, condition, price, currency, priceUsd,
-         url, imageUrl, endsAt, foundAt, updatedAt, pipelineVersion)
+         fxRate, url, imageUrl, endsAt, foundAt, updatedAt, pipelineVersion)
       VALUES
         (@key, @market, @marketId, @title, @brandKey, @item, @size, @condition, @price, @currency, @priceUsd,
-         @url, @imageUrl, @endsAt, @foundAt, @updatedAt, @pipelineVersion)
+         @fxRate, @url, @imageUrl, @endsAt, @foundAt, @updatedAt, @pipelineVersion)
       ON CONFLICT(key) DO UPDATE SET
         title = excluded.title,
         brandKey = excluded.brandKey,
@@ -131,6 +164,7 @@ export class Store {
         price = excluded.price,
         currency = excluded.currency,
         priceUsd = excluded.priceUsd,
+        fxRate = excluded.fxRate,
         url = excluded.url,
         imageUrl = excluded.imageUrl,
         endsAt = excluded.endsAt,
@@ -143,9 +177,16 @@ export class Store {
     this.recentByBrandStmt = this.db.prepare(
       "SELECT * FROM listings WHERE brandKey = ? AND updatedAt >= ? ORDER BY priceUsd DESC LIMIT 500",
     );
+    // The band is computed from the native price at the rate bound in, so the
+    // rows selected agree with the rate the caller converts them at. Bucketing
+    // on the stored column would filter at an ingest-time rate and then compare
+    // at today's — a refresh could silently move a listing into or out of its
+    // own comp set. `currency` is only ever JPY or USD (`Listing["currency"]`).
     this.recentByBrandRoundedStmt = this.db.prepare(
       `SELECT * FROM listings
-       WHERE brandKey = ? AND ROUND(priceUsd / ?) * ? = ? AND updatedAt >= ?
+       WHERE brandKey = ?
+         AND ROUND((CASE WHEN currency = 'USD' THEN price ELSE price * ? END) / ?) * ? = ?
+         AND updatedAt >= ?
        ORDER BY priceUsd DESC LIMIT 200`,
     );
     this.addSubStmt = this.db.prepare(`
@@ -192,24 +233,29 @@ export class Store {
     this.countMissingStmt = this.db.prepare(
       "SELECT COUNT(*) AS c FROM listings WHERE missingSince IS NOT NULL",
     );
+    // The native price + currency come along so the mapper can convert at the
+    // rate in force now instead of the deal's ingest-time priceUsd.
+    const DEAL_COLS = `d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition,
+         l.missingSince AS missingSince, l.price AS nativePrice, l.currency AS nativeCurrency`;
+
     this.recentDealsStmt = this.db.prepare(
-      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition, l.missingSince AS missingSince
+      `SELECT ${DEAL_COLS}
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        ORDER BY d.foundAt DESC LIMIT ?`,
     );
     this.recentDealsByBrandStmt = this.db.prepare(
-      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition, l.missingSince AS missingSince
+      `SELECT ${DEAL_COLS}
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        WHERE d.brandKey = ? ORDER BY d.foundAt DESC LIMIT ?`,
     );
     this.recentDealsSinceStmt = this.db.prepare(
-      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition, l.missingSince AS missingSince
+      `SELECT ${DEAL_COLS}
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        WHERE d.foundAt >= ?
        ORDER BY d.foundAt DESC LIMIT ?`,
     );
     this.recentDealsByBrandSinceStmt = this.db.prepare(
-      `SELECT d.*, l.imageUrl AS imageUrl, l.size AS size, l.condition AS condition, l.missingSince AS missingSince
+      `SELECT ${DEAL_COLS}
        FROM deals d LEFT JOIN listings l ON l.key = d.listingKey
        WHERE d.brandKey = ? AND d.foundAt >= ? ORDER BY d.foundAt DESC LIMIT ?`,
     );
@@ -277,11 +323,13 @@ export class Store {
   }
 
   get(market: MarketId, id: string): StoredListing | undefined {
-    return this.getStmt.get(market, id) as unknown as StoredListing | undefined;
+    const row = this.getStmt.get(market, id) as unknown as StoredListing | undefined;
+    return row && withCurrentUsd(row, fxRatesSnapshot());
   }
 
   upsertListing(l: Listing): void {
     const now = new Date().toISOString();
+    const rates = fxRatesSnapshot();
     this.upsertListingStmt.run({
       key: `${l.market}:${l.id}`,
       market: l.market,
@@ -300,33 +348,51 @@ export class Store {
       foundAt: l.foundAt,
       updatedAt: now,
       pipelineVersion: PIPELINE_VERSION,
+      // Not round2 — this is a rate, not money: rounding 1/155 to cents
+      // records 0.01 and makes the row's vintage unauditable.
+      fxRate: usdFrom(1, l.currency, rates),
     });
   }
 
   recentListings(hours: number): StoredListing[] {
     const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
-    return this.recentStmt.all(cutoff) as unknown as StoredListing[];
+    return this.convert(this.recentStmt.all(cutoff) as unknown as StoredListing[]);
   }
 
   recentByBrand(brandKey: string, hours: number): StoredListing[] {
     const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
-    return this.recentByBrandStmt.all(brandKey, cutoff) as unknown as StoredListing[];
+    return this.convert(this.recentByBrandStmt.all(brandKey, cutoff) as unknown as StoredListing[]);
   }
 
+  /**
+   * Rows of `brandKey` whose price falls in the same rounded band, converted at
+   * the pinned `rates`. The caller passes the same set it used for the
+   * candidate, so the filter and the values compared agree even if a refresh
+   * lands mid-evaluation.
+   */
   recentByBrandRounded(
     brandKey: string,
     roundUsd: number,
     roundedPrice: number,
     hours: number,
+    rates: Readonly<Record<string, number>> = fxRatesSnapshot(),
   ): StoredListing[] {
     const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
-    return this.recentByBrandRoundedStmt.all(
+    const rows = this.recentByBrandRoundedStmt.all(
       brandKey,
+      jpyUsdRate(rates),
       roundUsd,
       roundUsd,
       roundedPrice,
       cutoff,
     ) as unknown as StoredListing[];
+    return rows.map((r) => withCurrentUsd(r, rates));
+  }
+
+  /** Convert a page of rows through one rate set. */
+  private convert(rows: StoredListing[]): StoredListing[] {
+    const rates = fxRatesSnapshot();
+    return rows.map((r) => withCurrentUsd(r, rates));
   }
 
   // ── subscriptions ────────────────────────────────────────────────────────
@@ -396,6 +462,19 @@ export class Store {
       size: string | null;
       condition: string | null;
       missingSince: string | null;
+      nativePrice: number | null;
+      nativeCurrency: string | null;
+    };
+    const rates = fxRatesSnapshot();
+    /** Today's USD value: from the native price when the listing is present,
+     *  else the deal's own ingest-time value (an orphaned row). */
+    const usdValue = (r: DealRow): number => {
+      if (r.nativePrice === null || r.nativeCurrency === null) return r.priceUsd;
+      try {
+        return round2(usdFrom(r.nativePrice, r.nativeCurrency, rates));
+      } catch {
+        return r.priceUsd;
+      }
     };
     const rows = (
       brand !== undefined && since !== undefined
@@ -410,36 +489,39 @@ export class Store {
     return rows
       .filter((r) => watchSet.has("all") || (r.brandKey !== null && watchSet.has(r.brandKey)))
       .slice(0, limit)
-      .map((r) => ({
-        listing: {
-          id: r.marketId,
-          market: r.market as MarketId,
-          title: r.title,
-          brandKey: r.brandKey ?? undefined,
-          price: r.priceUsd,
-          currency: "USD" as const,
-          priceUsd: r.priceUsd,
-          url: r.url,
-          foundAt: r.foundAt,
-          imageUrl: r.imageUrl ?? undefined,
-          size: r.size ?? undefined,
-          condition: r.condition ?? undefined,
-          // Attached for the sold-velocity surfaces; undefined ≡ live row.
-          missingSince: r.missingSince ?? undefined,
-        },
-        proxy: proxyLinks({
-          id: r.marketId,
-          market: r.market as MarketId,
-          title: r.title,
-          price: r.priceUsd,
-          currency: "USD",
-          priceUsd: r.priceUsd,
-          url: r.url,
-          foundAt: r.foundAt,
-        }),
-        reasons: JSON.parse(r.reasons) as Deal["reasons"],
-        score: r.score,
-      }));
+      .map((r) => {
+        const priceUsd = usdValue(r);
+        return {
+          listing: {
+            id: r.marketId,
+            market: r.market as MarketId,
+            title: r.title,
+            brandKey: r.brandKey ?? undefined,
+            price: priceUsd,
+            currency: "USD" as const,
+            priceUsd,
+            url: r.url,
+            foundAt: r.foundAt,
+            imageUrl: r.imageUrl ?? undefined,
+            size: r.size ?? undefined,
+            condition: r.condition ?? undefined,
+            // Attached for the sold-velocity surfaces; undefined ≡ live row.
+            missingSince: r.missingSince ?? undefined,
+          },
+          proxy: proxyLinks({
+            id: r.marketId,
+            market: r.market as MarketId,
+            title: r.title,
+            price: priceUsd,
+            currency: "USD",
+            priceUsd,
+            url: r.url,
+            foundAt: r.foundAt,
+          }),
+          reasons: JSON.parse(r.reasons) as Deal["reasons"],
+          score: r.score,
+        };
+      });
   }
 
   // ── pipeline recompute support ──────────────────────────────────────────
@@ -463,7 +545,9 @@ export class Store {
   }
 
   staleListings(limit: number): StoredListing[] {
-    return this.staleListingsStmt.all(PIPELINE_VERSION, limit) as unknown as StoredListing[];
+    return this.convert(
+      this.staleListingsStmt.all(PIPELINE_VERSION, limit) as unknown as StoredListing[],
+    );
   }
 
   countStale(): number {
@@ -566,9 +650,11 @@ export class Store {
   listingsForBrands(brandKeys: string[]): StoredListing[] {
     if (brandKeys.length === 0) return [];
     const ph = brandKeys.map(() => "?").join(",");
-    return this.db
-      .prepare(`SELECT * FROM listings WHERE brandKey IN (${ph})`)
-      .all(...brandKeys) as unknown as StoredListing[];
+    return this.convert(
+      this.db
+        .prepare(`SELECT * FROM listings WHERE brandKey IN (${ph})`)
+        .all(...brandKeys) as unknown as StoredListing[],
+    );
   }
 
   /** Total currently-missing rows (test/ops surface). */

@@ -271,6 +271,30 @@ export class DiscordNotifier {
     }
   }
 
+  /**
+   * Post an operational warning to every subscribed channel.
+   *
+   * Degradation that only shows up in logs is degradation nobody acts on: an FX
+   * fallback that stays fallback for a week silently misprices every dollar
+   * label. Falls back to the configured webhook, then to the log.
+   */
+  async alertOperators(title: string, detail: string): Promise<void> {
+    const embeds: EmbedPayload[] = [{ title, description: detail, color: 0xe67e22, fields: [] }];
+    const channels = [...new Set(this.store.listSubscriptions().map((s) => s.channelId))];
+
+    if (this.client && channels.length > 0) {
+      await this.sendEmbedsToChannels(embeds, channels);
+      return;
+    }
+    if (this.env.webhookUrl) {
+      await this.sendWebhook(this.env.webhookUrl, embeds).catch((err) =>
+        logger.warn({ err }, "operator alert webhook failed"),
+      );
+      return;
+    }
+    logger.warn({ title, detail }, "operator alert (no discord configured)");
+  }
+
   private async sendEmbedsToChannels(embeds: EmbedPayload[], channels: string[]): Promise<string[]> {
     const sent: string[] = [];
     for (const channelId of channels) {

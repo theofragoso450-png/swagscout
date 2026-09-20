@@ -3,6 +3,7 @@ import { evaluateThreshold } from "../config/rules.js";
 import { findComps, DEFAULT_COMP_OPTIONS, type CompOptions } from "./comps.js";
 import type { StoredListing, Store } from "./store.js";
 import { proxyLinks } from "../proxy/links.js";
+import { fxRatesSnapshot, round2, usdFrom } from "./fx.js";
 
 export interface ScoreContext {
   store: Store;
@@ -25,11 +26,24 @@ export function evaluateDeal(
 ): Deal | undefined {
   const reasons: DealReason[] = [...(extraReasons ?? [])];
 
+  // One rate set for the whole evaluation. The candidate's priceUsd was baked in
+  // at ingest; re-deriving it here from the native price and pinning the same
+  // set for the band filter and every comp means a refresh landing mid-decision
+  // cannot compare today's yen against yesterday's dollar.
+  const rates = fxRatesSnapshot();
+  let candidateUsd = l.priceUsd;
+  try {
+    candidateUsd = round2(usdFrom(l.price, l.currency, rates));
+  } catch {
+    /* currency we cannot convert — keep the value ingest recorded */
+  }
+  const candidate: Listing = { ...l, priceUsd: candidateUsd };
+
   // 1) Static threshold rule
   const threshold = evaluateThreshold({
-    brandKey: l.brandKey,
-    title: l.title,
-    priceUsd: l.priceUsd,
+    brandKey: candidate.brandKey,
+    title: candidate.title,
+    priceUsd: candidateUsd,
   });
   if (threshold) {
     reasons.push({ kind: "threshold", detail: threshold });
@@ -37,12 +51,18 @@ export function evaluateDeal(
 
   // 2) Cross-market comps (phase-2 engine, same codebase)
   let comp: Deal["comp"] | undefined;
-  if (l.brandKey) {
+  if (candidate.brandKey) {
     const roundUsd = ctx.compRoundUsd;
-    const rounded = Math.round(l.priceUsd / roundUsd) * roundUsd;
-    const band = ctx.store.recentByBrandRounded(l.brandKey, roundUsd, rounded, 14 * 24);
+    const rounded = Math.round(candidateUsd / roundUsd) * roundUsd;
+    const band = ctx.store.recentByBrandRounded(
+      candidate.brandKey,
+      roundUsd,
+      rounded,
+      14 * 24,
+      rates,
+    );
     const compMatch = findComps(
-      l,
+      candidate,
       band,
       ctx.compOptions ?? DEFAULT_COMP_OPTIONS,
       ctx.compsExcludeSameMarket ?? false,
@@ -59,8 +79,8 @@ export function evaluateDeal(
 
   if (reasons.length === 0) return undefined;
 
-  const score = scoreDeal(l, reasons, comp);
-  return { listing: l, proxy: proxyLinks(l), reasons, score, comp };
+  const score = scoreDeal(candidate, reasons, comp);
+  return { listing: candidate, proxy: proxyLinks(candidate), reasons, score, comp };
 }
 
 /**
