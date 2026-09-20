@@ -3,6 +3,7 @@ import { logger } from "./logger.js";
 import { Store } from "./core/store.js";
 import { recomputeStale } from "./core/recompute.js";
 import { startRetention } from "./core/retention.js";
+import { startFxRefresh, fxSourceName, FX_SOURCE_URL } from "./core/fx.js";
 import { HttpClient, closeSharedDispatcher } from "./core/http.js";
 import { runShutdown, type Signal } from "./core/shutdown.js";
 import { Poller } from "./core/poller.js";
@@ -59,6 +60,13 @@ async function main(): Promise<void> {
     startRetention(store, { days: env.retentionDays });
   }
 
+  // Live FX rates: restore the cached snapshot and refresh it when the cadence
+  // says it is stale. FX_REFRESH_HOURS=0 keeps the built-in static table.
+  startFxRefresh(store, {
+    hours: env.fxRefreshHours,
+    fetchJson: () => http.getJson(FX_SOURCE_URL),
+  });
+
   const poller = new Poller(
     store,
     adapters,
@@ -92,7 +100,7 @@ async function main(): Promise<void> {
     const fmt = (n: number) => n.toLocaleString("en-US");
     return `${fmt(listings.length)} listings · ${fmt(deals.length)} deals · last 14d · ${perMarket
       .map((p) => `${p.m} ${fmt(p.c)}`)
-      .join(" · ")}`;
+      .join(" · ")} · FX ${fxSourceName()}`;
   });
 
   await notifier.start();
