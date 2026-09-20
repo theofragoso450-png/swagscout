@@ -3,7 +3,7 @@ import { logger } from "./logger.js";
 import { Store } from "./core/store.js";
 import { recomputeStale } from "./core/recompute.js";
 import { startRetention } from "./core/retention.js";
-import { startFxRefresh, fxSourceName, FX_SOURCE_URL } from "./core/fx.js";
+import { startFxRefresh, fxStatusLabel, FX_SOURCE_URL } from "./core/fx.js";
 import { HttpClient, closeSharedDispatcher } from "./core/http.js";
 import { runShutdown, type Signal } from "./core/shutdown.js";
 import { Poller } from "./core/poller.js";
@@ -62,9 +62,19 @@ async function main(): Promise<void> {
 
   // Live FX rates: restore the cached snapshot and refresh it when the cadence
   // says it is stale. FX_REFRESH_HOURS=0 keeps the built-in static table.
+  // A refresh streak is not a log-only event — dollar labels drift silently
+  // while it lasts, so it is worth telling the channels we already alert to.
   startFxRefresh(store, {
     hours: env.fxRefreshHours,
     fetchJson: () => http.getJson(FX_SOURCE_URL),
+    onDegraded: (info) => {
+      void notifier.alertOperators(
+        "FX rates are stale",
+        `${info.consecutiveFailures} consecutive refresh failures (${info.reason}). ` +
+          `Prices are still served from ${fxStatusLabel(env.fxRefreshHours)}, but dollar ` +
+          `labels drift until a refresh succeeds.`,
+      );
+    },
   });
 
   const poller = new Poller(
@@ -100,7 +110,7 @@ async function main(): Promise<void> {
     const fmt = (n: number) => n.toLocaleString("en-US");
     return `${fmt(listings.length)} listings · ${fmt(deals.length)} deals · last 14d · ${perMarket
       .map((p) => `${p.m} ${fmt(p.c)}`)
-      .join(" · ")} · FX ${fxSourceName()}`;
+      .join(" · ")} · FX ${fxStatusLabel(env.fxRefreshHours)}`;
   });
 
   await notifier.start();

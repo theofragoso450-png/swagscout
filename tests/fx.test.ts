@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Store } from "../src/core/store.js";
+import { normalizeListing } from "../src/core/normalize.js";
 import { loadEnv } from "../src/config/env.js";
 import * as fx from "../src/core/fx.js";
 
@@ -73,6 +75,26 @@ describe("parseFxRates rejects payloads that would corrupt state", () => {
     const { JPY: _dropped, ...withoutYen } = GOOD_PAYLOAD.rates;
     expect(fx.parseFxRates({ rates: withoutYen })).toBeNull();
   });
+
+  it("accepts a payload that only carries the currencies we actually convert", () => {
+    expect(fx.parseFxRates({ rates: { USD: 1, JPY: 150 } })).toEqual({ USD: 1, JPY: 1 / 150 });
+  });
+
+  it.each(["EUR", "GBP"])(
+    "lets a missing or bad %s through instead of sinking the payload",
+    (code) => {
+      const { [code as "EUR" | "GBP"]: _gone, ...without } = GOOD_PAYLOAD.rates;
+      const dropped = fx.parseFxRates({ rates: without });
+      expect(dropped).not.toBeNull();
+      expect(dropped!.JPY).toBeCloseTo(1 / 150, 8);
+      expect(dropped![code]).toBeUndefined(); // absent, and not fatal
+
+      const bad = fx.parseFxRates({ rates: { ...GOOD_PAYLOAD.rates, [code]: -1 } });
+      expect(bad).not.toBeNull();
+      expect(bad!.JPY).toBeCloseTo(1 / 150, 8);
+      expect(bad![code]).toBeUndefined();
+    },
+  );
 
   it.each([
     ["zero", 0],
@@ -324,5 +346,237 @@ describe("FX_REFRESH_HOURS configuration", () => {
       process.env[KEY] = raw;
       expect(loadEnv().fxRefreshHours, `raw=${JSON.stringify(raw)}`).toBe(24);
     }
+  });
+});
+
+// ── rate consistency: values derived at read time, not at ingest ─────────────
+
+function payload(rates: Record<string, number>) {
+  return { result: "success", base_code: "USD", rates };
+}
+
+function listing(id: string, price: number, currency: "JPY" | "USD" = "JPY", brandKey?: string) {
+  const l = normalizeListing({
+    market: "yahoo",
+    id,
+    title: `${brandKey ?? ""} test item ${id}`.trim(),
+    price,
+    currency,
+    url: `https://example.test/${id}`,
+  });
+  if (brandKey) l.brandKey = brandKey;
+  return l;
+}
+
+describe("stored USD values follow the rate in force, not the ingest rate", () => {
+  it("re-derives priceUsd when the rate moves, keeping the ingest record", async () => {
+    const store = openStore();
+    store.upsertListing(listing("j1", 15_500)); // $100 at the static 155 JPY/USD
+    expect(store.get("yahoo", "j1")!.priceUsd).toBe(100);
+    expect(store.get("yahoo", "j1")!.fxRate).toBeCloseTo(1 / 155, 8);
+
+    await fx.refreshFxRates(store, async () => payload({ USD: 1, JPY: 150 }));
+
+    // The column still holds the ingest-time value...
+    const raw = new DatabaseSync(dbPath, { readOnly: true });
+    const row = raw.prepare("SELECT priceUsd, fxRate FROM listings WHERE key = ?").get("yahoo:j1") as unknown as {
+      priceUsd: number;
+      fxRate: number;
+    };
+    raw.close();
+    expect(row.priceUsd).toBe(100);
+    expect(row.fxRate).toBeCloseTo(1 / 155, 8);
+
+    // ...while the read is converted at the rate now in force.
+    expect(store.get("yahoo", "j1")!.priceUsd).toBeCloseTo(103.33, 2);
+  });
+
+  it("keeps a whole page on one rate", async () => {
+    const store = openStore();
+    store.upsertListing(listing("a", 15_500));
+    await fx.refreshFxRates(store, async () => payload({ USD: 1, JPY: 310 }));
+    store.upsertListing(listing("b", 15_500));
+
+    const page = store.recentListings(24);
+    expect(page).toHaveLength(2);
+    expect(new Set(page.map((r) => r.priceUsd)).size).toBe(1); // no vintage mix
+    expect(page[0]!.priceUsd).toBe(50); // both at 310, not one at 155
+  });
+
+  it("buckets the comp band at the current rate, so a moved rate re-buckets consistently", async () => {
+    const store = openStore();
+    store.upsertListing(listing("c1", 15_500, "JPY", "cdg"));
+
+    // At the static rate: 15500/155 = $100 → band 100.
+    expect(store.recentByBrandRounded("cdg", 50, 100, 24).map((r) => r.marketId)).toEqual(["c1"]);
+
+    await fx.refreshFxRates(store, async () => payload({ USD: 1, JPY: 310 }));
+
+    // 15500/310 = $50 → it belongs to band 50 now, and must have left band 100.
+    expect(store.recentByBrandRounded("cdg", 50, 100, 24)).toHaveLength(0);
+    expect(store.recentByBrandRounded("cdg", 50, 50, 24).map((r) => r.marketId)).toEqual(["c1"]);
+  });
+
+  it("derives deal prices at the current rate too", async () => {
+    const store = openStore();
+    const l = listing("d1", 15_500, "JPY", "cdg");
+    store.upsertListing(l);
+    store.recordDeal({
+      listing: l,
+      proxy: {},
+      reasons: [{ kind: "threshold", detail: "test reason" }],
+      score: 40,
+    });
+    expect(store.recentDeals(["all"], 10)[0]!.listing.priceUsd).toBe(100);
+
+    await fx.refreshFxRates(store, async () => payload({ USD: 1, JPY: 310 }));
+    expect(store.recentDeals(["all"], 10)[0]!.listing.priceUsd).toBe(50);
+  });
+
+  it("an unknown currency falls back to the stored value instead of throwing", () => {
+    const store = openStore();
+    const l = listing("e1", 100, "USD");
+    store.upsertListing(l);
+    // Forge a currency the rate table does not know (a future market's row).
+    store.transaction(() => {
+      const db = new DatabaseSync(dbPath);
+      db.prepare("UPDATE listings SET currency = 'SEK' WHERE key = ?").run("yahoo:e1");
+      db.close();
+    });
+    expect(store.get("yahoo", "e1")!.priceUsd).toBe(100);
+  });
+});
+
+describe("provenance, age, and staleness", () => {
+  const NOON = Date.parse("2026-09-20T12:00:00.000Z");
+  const HOUR = 3_600_000;
+
+  it("labels live, cached-with-age, stale, and static", async () => {
+    const store = openStore();
+    expect(fx.fxStatusLabel(24, NOON)).toBe("static");
+
+    await fx.refreshFxRates(store, async () => GOOD_PAYLOAD, NOON);
+    expect(fx.fxStatusLabel(24, NOON)).toBe("live");
+
+    fx.resetFxRates();
+    const restored = openStore();
+    expect(fx.restoreFxRates(restored)).toBe(true);
+    expect(fx.fxAgeHours(NOON)).toBe(0);
+    expect(fx.fxStatusLabel(24, NOON + 2 * HOUR)).toBe("cached 2h");
+    // Past 2x the cadence the cache is called what it is.
+    expect(fx.fxStatusLabel(24, NOON + 49 * HOUR)).toBe("stale 2d");
+  });
+
+  it("never calls anything stale when the cadence is off", async () => {
+    const store = openStore();
+    await fx.refreshFxRates(store, async () => GOOD_PAYLOAD, NOON);
+    fx.resetFxRates();
+    expect(fx.restoreFxRates(openStore())).toBe(true);
+    expect(fx.fxStatusLabel(0, NOON + 1000 * HOUR)).toBe("cached 42d");
+  });
+
+  it("appends the failure count so a failing refresh is visible", async () => {
+    const store = openStore();
+    await fx.refreshFxRates(store, async () => GOOD_PAYLOAD, NOON);
+    await fx.refreshFxRates(store, async () => {
+      throw new Error("offline");
+    });
+    expect(fx.fxStatusLabel(24, NOON)).toBe("live, 1 failed");
+  });
+});
+
+describe("degradation alerting", () => {
+  it("fires the handler once per failure streak, at the threshold", async () => {
+    const store = openStore();
+    const alerts: fx.FxDegradedInfo[] = [];
+    const boom = async (): Promise<unknown> => {
+      throw new Error("offline");
+    };
+    const onDegraded = (info: fx.FxDegradedInfo) => alerts.push(info);
+
+    for (let i = 0; i < 5; i++) await fx.refreshFxRates(store, boom, Date.now(), onDegraded);
+
+    expect(fx.fxConsecutiveFailures()).toBe(5);
+    expect(alerts).toHaveLength(1); // stays one alert, not one per tick
+    expect(alerts[0]!.consecutiveFailures).toBe(fx.FX_ALERT_AFTER_FAILURES);
+    expect(alerts[0]!.reason).toBe("fetch failed");
+  });
+
+  it("a success clears the streak, so a later outage alerts again", async () => {
+    const store = openStore();
+    const alerts: fx.FxDegradedInfo[] = [];
+    const onDegraded = (info: fx.FxDegradedInfo) => alerts.push(info);
+    const boom = async (): Promise<unknown> => {
+      throw new Error("offline");
+    };
+
+    for (let i = 0; i < 3; i++) await fx.refreshFxRates(store, boom, Date.now(), onDegraded);
+    await fx.refreshFxRates(store, async () => GOOD_PAYLOAD);
+    expect(fx.fxConsecutiveFailures()).toBe(0);
+
+    for (let i = 0; i < 3; i++) await fx.refreshFxRates(store, boom, Date.now(), onDegraded);
+    expect(alerts).toHaveLength(2);
+  });
+
+  it("alerts on a sustained invalid payload too", async () => {
+    const store = openStore();
+    const alerts: fx.FxDegradedInfo[] = [];
+    for (let i = 0; i < 3; i++) {
+      await fx.refreshFxRates(store, async () => ({ rates: { USD: 1 } }), Date.now(), (info) =>
+        alerts.push(info),
+      );
+    }
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.reason).toBe("invalid payload");
+  });
+
+  it("a throwing handler cannot break the refresh path", async () => {
+    const store = openStore();
+    const res = await fx.refreshFxRates(
+      store,
+      async () => {
+        throw new Error("offline");
+      },
+      Date.now(),
+      () => {
+        throw new Error("handler exploded");
+      },
+    );
+    expect(res.ok).toBe(false);
+    expect(fx.fxConsecutiveFailures()).toBe(1);
+  });
+});
+
+describe("pure conversion helpers", () => {
+  it("usdFrom converts at only the rates it is handed", () => {
+    const rates = { USD: 1, JPY: 1 / 200 };
+    expect(fx.usdFrom(200, "JPY", rates)).toBeCloseTo(1, 8);
+    expect(fx.usdFrom(7, "usd", rates)).toBe(7);
+    expect(() => fx.usdFrom(1, "EUR", rates)).toThrow(/Unknown currency/);
+  });
+
+  it("a snapshot stays put while the live set changes", async () => {
+    const store = openStore();
+    const before = fx.fxRatesSnapshot();
+    await fx.refreshFxRates(store, async () => payload({ USD: 1, JPY: 150 }));
+    expect(before.JPY).toBeCloseTo(1 / 155, 8); // captured, not a live view
+    expect(fx.fxRatesSnapshot().JPY).toBeCloseTo(1 / 150, 8);
+    expect(fx.jpyUsdRate()).toBeCloseTo(1 / 150, 8);
+  });
+
+  it("reference currencies the payload omits keep their compiled-in values", async () => {
+    const store = openStore();
+    await fx.refreshFxRates(store, async () => payload({ USD: 1, JPY: 150 }));
+    expect(fx.currentFxRates().EUR).toBe(1.08);
+    expect(fx.currentFxRates().GBP).toBe(1.27);
+    expect(fx.currentFxRates().JPY).toBeCloseTo(1 / 150, 8);
+  });
+
+  it("round2 is money precision, and is not what a rate gets stored as", () => {
+    expect(fx.round2(103.333)).toBe(103.33);
+    expect(fx.round2(103.336)).toBe(103.34);
+    // The reason store.ts keeps the raw rate: cents would destroy a yen rate.
+    expect(fx.round2(1 / 155)).toBe(0.01);
+    expect(fx.round2(1 / 155)).not.toBeCloseTo(1 / 155, 4);
   });
 });
