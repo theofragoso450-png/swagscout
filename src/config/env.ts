@@ -33,6 +33,13 @@ function parseRetentionDays(raw: string | undefined): number {
   return Number.isFinite(n) && n >= 0 ? n : 30;
 }
 
+/** Live FX refresh cadence in hours; 0 keeps the static table. Default 24. */
+function parseFxRefreshHours(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return 24;
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n >= 0 ? n : 24;
+}
+
 function parseList(name: string): string[] {
   const v = opt(name);
   if (!v) return [];
@@ -59,6 +66,13 @@ export interface Env {
   digestHour?: number;
   /** Retention window in days for listings + deals; 0 disables pruning. */
   retentionDays: number;
+  /** Live FX refresh cadence in hours — a duration, not a wall-clock hour, so
+   *  unlike DIGEST_HOUR_JST it carries no timezone suffix. Default 24; 0 keeps
+   *  the built-in static table (the same zero-means-off idiom as
+   *  RETENTION_DAYS). The last good snapshot is cached in the store and is
+   *  re-served when a fetch fails, so the static table is only reached on a
+   *  database that has never held a snapshot. */
+  fxRefreshHours: number;
 }
 
 export function loadEnv(): Env {
@@ -86,6 +100,8 @@ export function loadEnv(): Env {
     digestHour: opt("DIGEST_HOUR_JST") === undefined ? undefined : clampHour(opt("DIGEST_HOUR_JST")),
     // Nightly retention: prune listings (and their deals) older than this.
     retentionDays: parseRetentionDays(process.env.RETENTION_DAYS),
+    // Live FX refresh cadence: hours between rate refreshes; 0 = static only.
+    fxRefreshHours: parseFxRefreshHours(process.env.FX_REFRESH_HOURS),
   };
 }
 
