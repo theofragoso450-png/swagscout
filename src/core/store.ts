@@ -1,7 +1,7 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import type { Deal, Listing, MarketId } from "../types.js";
+import type { Deal, DealReason, Listing, MarketId } from "../types.js";
 import { proxyLinks } from "../proxy/links.js";
 import { PIPELINE_VERSION } from "./pipeline.js";
 import { fxRatesSnapshot, jpyUsdRate, round2, usdFrom } from "./fx.js";
@@ -92,6 +92,7 @@ export class Store {
   private countStaleStmt: StatementSync;
   private updateDerivedStmt: StatementSync;
   private hasDealStmt: StatementSync;
+  private dealReasonsStmt: StatementSync;
   private deleteDealsForStmt: StatementSync;
   private deleteOldListingsStmt: StatementSync;
   private deleteOrphanDealsStmt: StatementSync;
@@ -218,6 +219,7 @@ export class Store {
       "UPDATE listings SET brandKey = ?, size = ?, pipelineVersion = ? WHERE key = ?",
     );
     this.hasDealStmt = this.db.prepare("SELECT 1 AS one FROM deals WHERE listingKey = ? LIMIT 1");
+    this.dealReasonsStmt = this.db.prepare("SELECT reasons FROM deals WHERE listingKey = ?");
     this.deleteDealsForStmt = this.db.prepare("DELETE FROM deals WHERE listingKey = ?");
     this.deleteOldListingsStmt = this.db.prepare("DELETE FROM listings WHERE updatedAt < ?");
     this.deleteOrphanDealsStmt = this.db.prepare(
@@ -439,6 +441,19 @@ export class Store {
     });
   }
 
+  /**
+   * Swap a listing's deal for a fresh one: drop whatever rows it has, then
+   * insert the new decision. A price drop is a new verdict on the same item,
+   * not a second item — appending left two rows (two cards, two digest
+   * entries, two alerts' worth of feed) for every listing that ever dropped.
+   * Two statements, so a caller that needs the swap to be atomic wraps it in
+   * a transaction, as the recompute pass does.
+   */
+  replaceDeal(deal: Deal): void {
+    this.deleteDealsFor(`${deal.listing.market}:${deal.listing.id}`);
+    this.recordDeal(deal);
+  }
+
   /** Recent deals for watches (brand keys or "all"), newest first.
    *  `opts.brand` scopes the SQL to the brand so a niche brand is not starved
    *  out by the newest-N window (the dashboard filter relies on this).
@@ -570,6 +585,20 @@ export class Store {
 
   dealExistsFor(listingKey: string): boolean {
     return this.hasDealStmt.get(listingKey) !== undefined;
+  }
+
+  /** A deal's stored reasons, so a rebuild can carry forward the ones the
+   *  engine cannot re-derive (a price drop is an observed event, not a value
+   *  computed from the listing). Unreadable JSON reads as no reasons. */
+  dealReasonsFor(listingKey: string): DealReason[] {
+    const row = this.dealReasonsStmt.get(listingKey) as { reasons: string } | undefined;
+    if (row === undefined) return [];
+    try {
+      const parsed: unknown = JSON.parse(row.reasons);
+      return Array.isArray(parsed) ? (parsed as DealReason[]) : [];
+    } catch {
+      return [];
+    }
   }
 
   deleteDealsFor(listingKey: string): number {

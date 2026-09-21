@@ -46,7 +46,7 @@ export function evaluateDeal(
     priceUsd: candidateUsd,
   });
   if (threshold) {
-    reasons.push({ kind: "threshold", detail: threshold });
+    reasons.push({ kind: "threshold", capUsd: threshold.maxUsd, note: threshold.note });
   }
 
   // 2) Cross-market comps (phase-2 engine, same codebase)
@@ -69,10 +69,22 @@ export function evaluateDeal(
     );
     if (compMatch && compMatch.discountPct >= (ctx.compOptions ?? DEFAULT_COMP_OPTIONS).triggerDiscountPct) {
       compMatch.roundUsd = roundUsd;
-      reasons.push({
-        kind: "comp",
-        detail: `${compMatch.discountPct}% below ${compMatch.sampleSize}-listing median ($${compMatch.medianUsd.toFixed(0)})`,
-      });
+      // Store the median natively (in the candidate's own currency), converted
+      // at the pinned rate. A USD median frozen here would drift against the
+      // card's re-derived price the moment the rate moved, eventually pushing the
+      // candidate above its own median and inverting the sentence.
+      const currency = candidate.currency;
+      const currencyRate = rates[currency] ?? 0;
+      reasons.push(
+        currencyRate > 0
+          ? {
+              kind: "comp",
+              medianPrice: round2(compMatch.medianUsd / currencyRate),
+              medianCurrency: currency,
+              sampleSize: compMatch.sampleSize,
+            }
+          : { kind: "comp", medianUsd: compMatch.medianUsd, sampleSize: compMatch.sampleSize },
+      );
       comp = compMatch;
     }
   }

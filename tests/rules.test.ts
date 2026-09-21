@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateThreshold } from "../src/config/rules.js";
+import { evaluateThreshold, THRESHOLD_RULES } from "../src/config/rules.js";
 import { scoreDeal } from "../src/core/score.js";
 import { proxyLinks } from "../src/proxy/links.js";
 import { buildDealEmbed } from "../src/notify/embeds.js";
@@ -9,12 +9,18 @@ import type { Deal, DealReason } from "../src/types.js";
 describe("evaluateThreshold", () => {
   it("fires under the brand cap", () => {
     const d = evaluateThreshold({ brandKey: "cdg", title: "cdg t-shirt", priceUsd: 50 });
-    expect(d).toBeDefined();
-    expect(d).toContain("≤ $120");
+    expect(d?.maxUsd).toBe(120);
+    expect(d?.note).toContain("CDG");
   });
 
   it("stays quiet above the cap", () => {
     expect(evaluateThreshold({ brandKey: "cdg", title: "cdg jacket", priceUsd: 300 })).toBeUndefined();
+  });
+
+  it("keeps the cap out of every note, so a cap change cannot leave a stale figure", () => {
+    for (const r of THRESHOLD_RULES) {
+      expect(r.note ?? "", `${r.brandKey} note`).not.toMatch(/\$/);
+    }
   });
 
   it("respects exclude terms (reps, wallets)", () => {
@@ -84,9 +90,8 @@ describe("evaluateThreshold", () => {
 describe("evaluateThreshold — ys", () => {
   it("fires under the $150 cap", () => {
     const d = evaluateThreshold({ brandKey: "ys", title: "Y's ワイズ チュニック", priceUsd: 19 });
-    expect(d).toBeDefined();
-    expect(d).toContain("≤ $150");
-    expect(d).toContain("Y's (Yohji women's)");
+    expect(d?.maxUsd).toBe(150);
+    expect(d?.note).toContain("Y's (Yohji women's)");
   });
 
   it("stays quiet above the cap", () => {

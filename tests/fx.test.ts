@@ -580,3 +580,89 @@ describe("pure conversion helpers", () => {
     expect(fx.round2(1 / 155)).not.toBeCloseTo(1 / 155, 4);
   });
 });
+
+describe("payload sanity: a feed contract change must not rescale every price", () => {
+  it("rejects an inverted unit — the classic FX feed failure", () => {
+    // `rates` are units per USD, so JPY is ~150. Receiving USD-per-JPY and
+    // inverting it prices every yen listing ~24,000x too high, silently.
+    expect(fx.parseFxRates({ rates: { USD: 1, JPY: 1 / 156 } })).toBeNull();
+  });
+
+  it("rejects a payload whose base is no longer USD", () => {
+    expect(fx.parseFxRates({ base_code: "JPY", rates: { USD: 0.0064, JPY: 1 } })).toBeNull();
+    expect(fx.parseFxRates({ rates: { USD: 0.9, JPY: 150 } })).toBeNull();
+  });
+
+  it("accepts a real regime change, and drops only the reference currency that is absurd", () => {
+    const moved = fx.parseFxRates(payload({ USD: 1, JPY: 200 }));
+    expect(moved?.JPY).toBeCloseTo(1 / 200, 8);
+
+    // EUR is never converted, so an implausible one is skipped rather than
+    // allowed to sink a payload the bot prices with.
+    const odd = fx.parseFxRates({ rates: { USD: 1, JPY: 150, EUR: 0.001 } });
+    expect(odd?.JPY).toBeCloseTo(1 / 150, 8);
+    expect(odd?.EUR).toBeUndefined();
+  });
+});
+
+describe("boot order and streak durability", () => {
+  it("restores the cache synchronously — the property the boot order relies on", async () => {
+    const seed = openStore();
+    await fx.refreshFxRates(seed, async () => payload({ USD: 1, JPY: 100 }));
+    fx.resetFxRates();
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const booting = fx.bootFxRefresh(openStore(), {
+      hours: 24,
+      fetchJson: async () => {
+        await held;
+        return payload({ USD: 1, JPY: 100 });
+      },
+    });
+
+    // Already in force, with the fetch still in flight — so a recompute that
+    // runs after startFxRefresh() bakes prices at the rate reads derive with.
+    expect(fx.fxSourceName()).toBe("cached");
+    expect(fx.toUsd(100, "JPY")).toBeCloseTo(1, 8);
+
+    release();
+    await booting;
+  });
+
+  it("pins the built-in table when the cadence is 0, snapshot or not", async () => {
+    const store = openStore();
+    await fx.refreshFxRates(store, async () => payload({ USD: 1, JPY: 100 }));
+    fx.resetFxRates();
+
+    const res = await fx.bootFxRefresh(openStore(), {
+      hours: 0,
+      fetchJson: async () => payload({ USD: 1, JPY: 100 }),
+    });
+    expect(res.source).toBe("static");
+    expect(fx.toUsd(155, "JPY")).toBeCloseTo(1, 8); // 1/155 in force, not 1/100
+  });
+
+  it("carries the failure streak across restarts, so a restart loop still alerts", async () => {
+    const alerts: fx.FxDegradedInfo[] = [];
+    const onDegraded = (info: fx.FxDegradedInfo) => alerts.push(info);
+    const boom = async (): Promise<unknown> => {
+      throw new Error("offline");
+    };
+
+    // Two processes fail once each and die. resetFxRates() is what a fresh
+    // process starts with, so an in-memory-only counter read 0 every time and
+    // the threshold was unreachable by construction.
+    for (let i = 0; i < 2; i++) {
+      await fx.bootFxRefresh(openStore(), { hours: 24, fetchJson: boom, onDegraded });
+      fx.resetFxRates();
+    }
+    expect(alerts).toHaveLength(0);
+
+    await fx.bootFxRefresh(openStore(), { hours: 24, fetchJson: boom, onDegraded });
+    expect(alerts).toHaveLength(1);
+    expect(fx.fxConsecutiveFailures()).toBe(fx.FX_ALERT_AFTER_FAILURES);
+  });
+});

@@ -2,6 +2,8 @@ import type { Deal, Listing } from "../types.js";
 import { MARKET_LABEL, MARKET_FLAG } from "../types.js";
 import { getBrand } from "../config/brands.js";
 import { safeUrl } from "../core/safe-url.js";
+import { formatReason } from "../core/reasons.js";
+import { formatUsd } from "../core/money.js";
 import type { FindRank } from "./finds.js";
 
 /** APIEmbed-compatible subset we build manually (no discord.js dependency here). */
@@ -25,10 +27,6 @@ function colorFor(score: number): number {
   if (score >= 70) return COLOR_HIGH;
   if (score >= 45) return COLOR_MID;
   return COLOR_LOW;
-}
-
-function fmtUsd(n: number): string {
-  return `$${n.toFixed(2).replace(/\.00$/, "")}`;
 }
 
 /** Honesty label for a missing listing: absence is not proof of sale. */
@@ -59,9 +57,11 @@ export function buildDealEmbed(deal: Deal): EmbedPayload {
   const flag = MARKET_FLAG[l.market];
 
   const priceLine =
-    l.currency === "JPY" ? `¥${l.price.toLocaleString("en-US")} ≈ ${fmtUsd(l.priceUsd)}` : fmtUsd(l.priceUsd);
+    l.currency === "JPY"
+      ? `¥${l.price.toLocaleString("en-US")} ≈ ${formatUsd(l.priceUsd)}`
+      : formatUsd(l.priceUsd);
 
-  const reasons = deal.reasons.map((r) => `• ${r.detail}`).join("\n");
+  const reasons = deal.reasons.map((r) => `• ${formatReason(r, l.priceUsd)}`).join("\n");
 
   const proxyParts: string[] = [];
   if (deal.proxy.buyee) proxyParts.push(`[Buyee](${deal.proxy.buyee})`);

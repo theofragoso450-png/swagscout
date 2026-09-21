@@ -1,140 +1,22 @@
-import { loadEnv, ensureDbDir } from "./config/env.js";
+import { loadEnv } from "./config/env.js";
 import { logger } from "./logger.js";
-import { Store } from "./core/store.js";
-import { recomputeStale } from "./core/recompute.js";
-import { startRetention } from "./core/retention.js";
-import { startFxRefresh, fxStatusLabel, FX_SOURCE_URL } from "./core/fx.js";
-import { HttpClient, closeSharedDispatcher } from "./core/http.js";
-import { runShutdown, type Signal } from "./core/shutdown.js";
-import { Poller } from "./core/poller.js";
-import { DiscordNotifier } from "./notify/discord.js";
-import { startDashboard } from "./web/server.js";
-import { closeSharedBrowser } from "./core/browser.js";
-import { YahooAuctionsAdapter } from "./markets/yahooAuctions.js";
-import { GrailedAdapter } from "./markets/grailed.js";
-import { EbayAdapter } from "./markets/ebay.js";
-import { MercariAdapter } from "./markets/mercari.js";
-import { RakumaAdapter } from "./markets/rakuma.js";
-import { ALL_MARKETS } from "./types.js";
+import { startApp } from "./app.js";
+import type { Signal } from "./core/shutdown.js";
 
+/**
+ * Entry point. The composition itself lives in app.ts so it can be exercised
+ * without a process to kill; what belongs here is only what a process owns:
+ * loading the environment, translating signals, and setting the exit code.
+ */
 async function main(): Promise<void> {
-  const env = loadEnv();
-  ensureDbDir(env);
-
-  const store = new Store(env.dbPath);
-  const http = new HttpClient(env.rateLimitRpm);
-
-  const adapters = [
-    new YahooAuctionsAdapter(http),
-    new GrailedAdapter(http, env.playwrightExecutablePath),
-    new EbayAdapter(http, env.ebayAppId, env.ebayCertId),
-    new MercariAdapter(http, env.playwrightExecutablePath),
-    new RakumaAdapter(http),
-  ];
-
-  const notifier = new DiscordNotifier(store, {
-    token: env.discordToken,
-    webhookUrl: env.discordWebhookUrl,
-    allowedChannels: env.discordAllowedChannels,
-  });
-
-  // Daily finds digest — only meaningful with a bot client that can post.
-  if (env.digestHour !== undefined && env.discordToken) {
-    notifier.startDigest(env.digestHour);
-  }
-
-  // Pipeline catch-up: rows stored by an older extraction pipeline get their
-  // brand/size/deal fields recomputed by the current one. Bump PIPELINE_VERSION
-  // to trigger; a no-op when everything is current.
-  const recompute = recomputeStale(store, { compRoundUsd: env.compRoundUsd });
-  if (recompute.remaining > 0) {
-    logger.warn(
-      { remaining: recompute.remaining },
-      "stale rows remain — they will be recomputed on next boot",
-    );
-  }
-
-  // Nightly retention: prune listings (and their deals) past the window.
-  // RETENTION_DAYS=0 disables; hourlies tick with boot catch-up.
-  if (env.retentionDays > 0) {
-    startRetention(store, { days: env.retentionDays });
-  }
-
-  // Live FX rates: restore the cached snapshot and refresh it when the cadence
-  // says it is stale. FX_REFRESH_HOURS=0 keeps the built-in static table.
-  // A refresh streak is not a log-only event — dollar labels drift silently
-  // while it lasts, so it is worth telling the channels we already alert to.
-  startFxRefresh(store, {
-    hours: env.fxRefreshHours,
-    fetchJson: () => http.getJson(FX_SOURCE_URL),
-    onDegraded: (info) => {
-      void notifier.alertOperators(
-        "FX rates are stale",
-        `${info.consecutiveFailures} consecutive refresh failures (${info.reason}). ` +
-          `Prices are still served from ${fxStatusLabel(env.fxRefreshHours)}, but dollar ` +
-          `labels drift until a refresh succeeds.`,
-      );
-    },
-  });
-
-  const poller = new Poller(
-    store,
-    adapters,
-    {
-      pollSeconds: env.pollSeconds,
-      compRoundUsd: env.compRoundUsd,
-      watchKeys: env.watchKeys,
-    },
-    async (results) => {
-      await notifier.sendDeals(results);
-      const totals = results.reduce(
-        (acc, r) => ({
-          fetched: acc.fetched + r.fetched,
-          new: acc.new + r.newListings,
-          deals: acc.deals + r.deals.length,
-        }),
-        { fetched: 0, new: 0, deals: 0 },
-      );
-      logger.info(totals, "poll round complete");
-    },
-  );
-
-  const dashboard = startDashboard(store, env.port, () => {
-    const listings = store.recentListings(24 * 14);
-    const deals = store.recentDeals(["all"], 1000);
-    // Busiest markets lead; zeros trail so a stalled market is still visible.
-    const perMarket = ALL_MARKETS.map((m) => ({
-      m,
-      c: listings.filter((l) => l.market === m).length,
-    })).sort((a, b) => b.c - a.c);
-    const fmt = (n: number) => n.toLocaleString("en-US");
-    return `${fmt(listings.length)} listings · ${fmt(deals.length)} deals · last 14d · ${perMarket
-      .map((p) => `${p.m} ${fmt(p.c)}`)
-      .join(" · ")} · FX ${fxStatusLabel(env.fxRefreshHours)}`;
-  });
-
-  await notifier.start();
-  await dashboard.start();
+  const app = await startApp(loadEnv());
 
   const shutdown = async (signal: Signal) => {
-    await runShutdown(
-      {
-        stopPolling: () => poller.stop(),
-        closeNotifier: () => notifier.stop(),
-        closeDashboard: () => dashboard.stop(),
-        closeBrowser: () => closeSharedBrowser().catch(() => {}),
-        closeDispatcher: closeSharedDispatcher,
-        closeStore: () => store.close(),
-      },
-      signal,
-    );
+    await app.shutdown(signal);
     process.exit(0);
   };
   process.on("SIGINT", (sig) => void shutdown(sig as Signal));
   process.on("SIGTERM", (sig) => void shutdown(sig as Signal));
-
-  poller.start();
-  logger.info({ port: env.port, db: env.dbPath }, "swagscout running");
 }
 
 main().catch((err) => {

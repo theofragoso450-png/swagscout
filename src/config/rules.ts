@@ -20,7 +20,9 @@ export interface ThresholdRule {
   excludeTerms?: string[];
   /** If set, the title must contain at least one of these. */
   requireTerms?: string[];
-  /** Human note shown in alerts. */
+  /** Human qualifier shown in alerts (e.g. "Yohji mainline"). It must never
+   *  restate `maxUsd`: the reason line already prints the cap, so a figure here
+   *  would go stale the moment the cap changed. */
   note?: string;
 }
 
@@ -31,139 +33,139 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
     brandKey: "cdg",
     maxUsd: 120,
     excludeTerms: [...REP_EXCLUDE, "wallet", "card case", "fragrance", "perfume"],
-    note: "CDG basics/mainline under $120",
+    note: "CDG basics/mainline",
   },
   {
     brandKey: "number-nine",
     maxUsd: 250,
     excludeTerms: REP_EXCLUDE,
-    note: "Number (N)ine under $250",
+    note: "Number (N)ine",
   },
   {
     brandKey: "yohji",
     maxUsd: 350,
     excludeTerms: [...REP_EXCLUDE, "belt", "tie"],
-    note: "Yohji mainline under $350",
+    note: "Yohji mainline",
   },
   {
     brandKey: "ys",
     maxUsd: 150,
     excludeTerms: REP_EXCLUDE,
-    note: "Y's (Yohji women's) under $150",
+    note: "Y's (Yohji women's)",
   },
   {
     brandKey: "issey",
     maxUsd: 200,
     excludeTerms: [...REP_EXCLUDE, "perfume", "fragrance", "cologne"],
-    note: "Issey Miyake apparel under $200",
+    note: "Issey Miyake apparel",
   },
   {
     brandKey: "raf",
     maxUsd: 400,
     excludeTerms: REP_EXCLUDE,
-    note: "Raf Simons under $400",
+    note: "Raf Simons",
   },
   {
     brandKey: "undercover",
     maxUsd: 250,
     excludeTerms: REP_EXCLUDE,
-    note: "Undercover under $250",
+    note: "Undercover",
   },
   {
     brandKey: "undercoverism",
     maxUsd: 200,
     excludeTerms: REP_EXCLUDE,
-    note: "Undercoverism under $200",
+    note: "Undercoverism",
   },
   {
     brandKey: "junya-watanabe",
     maxUsd: 300,
     excludeTerms: REP_EXCLUDE,
-    note: "Junya Watanabe under $300",
+    note: "Junya Watanabe",
   },
   {
     brandKey: "margiela",
     maxUsd: 300,
     excludeTerms: REP_EXCLUDE,
-    note: "Margiela under $300",
+    note: "Margiela",
   },
   {
     brandKey: "helmut-lang",
     maxUsd: 150,
     excludeTerms: REP_EXCLUDE,
-    note: "Helmut Lang under $150",
+    note: "Helmut Lang",
   },
   {
     brandKey: "rick-owens",
     maxUsd: 300,
     excludeTerms: [...REP_EXCLUDE, "sneakers", "geobasket", "drkshdw tee"],
-    note: "Rick Owens under $300 (leather usually worth more)",
+    note: "Rick Owens (leather usually worth more)",
   },
   {
     brandKey: "visvim",
     maxUsd: 250,
     excludeTerms: REP_EXCLUDE,
-    note: "Visvim under $250",
+    note: "Visvim",
   },
   {
     brandKey: "kapital",
     maxUsd: 180,
     excludeTerms: REP_EXCLUDE,
-    note: "Kapital under $180",
+    note: "Kapital",
   },
   {
     brandKey: "needles",
     maxUsd: 120,
     excludeTerms: REP_EXCLUDE,
-    note: "Needles/Nepenthes under $120",
+    note: "Needles/Nepenthes",
   },
   {
     brandKey: "guidi",
     maxUsd: 400,
     excludeTerms: [...REP_EXCLUDE, "wallet", "cardholder"],
-    note: "Guidi leather under $400",
+    note: "Guidi leather",
   },
   {
     brandKey: "ann-d",
     maxUsd: 250,
     excludeTerms: REP_EXCLUDE,
-    note: "Ann Demeulemeester under $250",
+    note: "Ann Demeulemeester",
   },
   {
     brandKey: "dries",
     maxUsd: 200,
     excludeTerms: REP_EXCLUDE,
-    note: "Dries Van Noten under $200",
+    note: "Dries Van Noten",
   },
   {
     brandKey: "jil-sander",
     maxUsd: 150,
     excludeTerms: REP_EXCLUDE,
-    note: "Jil Sander under $150",
+    note: "Jil Sander",
   },
   {
     brandKey: "cavempt",
     maxUsd: 100,
     excludeTerms: REP_EXCLUDE,
-    note: "Cav Empt under $100",
+    note: "Cav Empt",
   },
   {
     brandKey: "mm6",
     maxUsd: 120,
     excludeTerms: REP_EXCLUDE,
-    note: "MM6 under $120",
+    note: "MM6",
   },
   {
     brandKey: "marni",
     maxUsd: 150,
     excludeTerms: REP_EXCLUDE,
-    note: "Marni under $150",
+    note: "Marni",
   },
   {
     brandKey: "sacai",
     maxUsd: 150,
     excludeTerms: REP_EXCLUDE,
-    note: "Sacai under $150",
+    note: "Sacai",
   },
   {
     brandKey: "bape",
@@ -183,13 +185,13 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
       "ドクターベイプ",
       "dr.vape",
     ],
-    note: "Nigo-era BAPE under $180",
+    note: "Nigo-era BAPE",
   },
   {
     brandKey: "evisu",
     maxUsd: 150,
     excludeTerms: [...REP_EXCLUDE, "wallet", "keychain", "pass case"],
-    note: "Evisu (daicock denim, logo pieces) under $150",
+    note: "Evisu (daicock denim, logo pieces)",
   },
   {
     brandKey: "supreme",
@@ -214,7 +216,7 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
       "ショッパー", // vintage paper shopping bags
       "紙袋",
     ],
-    note: "Supreme early-2000s (era-tagged) under $250",
+    note: "Supreme early-2000s (era-tagged)",
   },
 ];
 
@@ -228,8 +230,15 @@ export interface RuleContext {
   priceUsd: number;
 }
 
-/** Evaluate the threshold rule (if any) for a listing. Returns detail or undefined. */
-export function evaluateThreshold(ctx: RuleContext): string | undefined {
+/** What a fired rule contributes: its parameters, not a rendered line. The
+ *  caller renders the price it is actually showing (core/reasons.ts). */
+export interface ThresholdMatch {
+  maxUsd: number;
+  note?: string;
+}
+
+/** Evaluate the threshold rule (if any) for a listing. */
+export function evaluateThreshold(ctx: RuleContext): ThresholdMatch | undefined {
   if (!ctx.brandKey) return undefined;
   const rule = RULES_BY_BRAND.get(ctx.brandKey);
   if (!rule) return undefined;
@@ -238,9 +247,6 @@ export function evaluateThreshold(ctx: RuleContext): string | undefined {
   if (rule.requireTerms && !rule.requireTerms.some((t) => title.includes(t.toLowerCase()))) {
     return undefined;
   }
-  if (ctx.priceUsd <= rule.maxUsd) {
-    const note = rule.note ? ` — ${rule.note}` : "";
-    return `price $${ctx.priceUsd.toFixed(0)} ≤ $${rule.maxUsd}${note}`;
-  }
+  if (ctx.priceUsd <= rule.maxUsd) return { maxUsd: rule.maxUsd, note: rule.note };
   return undefined;
 }

@@ -6,6 +6,8 @@ import { THRESHOLD_RULES } from "../config/rules.js";
 import type { Deal } from "../types.js";
 import { fetchThumb, isAllowedImageUrl } from "./thumbs.js";
 import { extractCondition } from "../core/normalize.js";
+import { formatReason } from "../core/reasons.js";
+import { formatUsd } from "../core/money.js";
 import { rankFinds, findsPool } from "../notify/finds.js";
 
 const CONDITION_LABEL: Record<string, string> = {
@@ -311,10 +313,12 @@ export function startDashboard(
       marketLabel: MARKET_LABEL[d.listing.market],
       priceLabel:
         d.listing.currency === "JPY"
-          ? `¥${d.listing.price.toLocaleString("en-US")} ≈ $${d.listing.priceUsd.toFixed(0)}`
-          : `$${d.listing.priceUsd.toFixed(2)}`,
+          ? `¥${d.listing.price.toLocaleString("en-US")} ≈ ${formatUsd(d.listing.priceUsd)}`
+          : formatUsd(d.listing.priceUsd),
       score: d.score,
-      reasons: d.reasons,
+      // Rendered against the price this card prints — a stored line would name
+      // whatever the rate was when the deal was recorded.
+      reasons: d.reasons.map((r) => ({ kind: r.kind, detail: formatReason(r, d.listing.priceUsd) })),
       // Honest sold-velocity: absence ≠ sale, so the label says both.
       missingForLabel: d.listing.missingSince
         ? fmtDuration(Math.round((Date.now() - Date.parse(d.listing.missingSince)) / 60_000)) || null

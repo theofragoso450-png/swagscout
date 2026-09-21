@@ -38,9 +38,22 @@ export const FX_REFERENCE_CURRENCIES = ["EUR", "GBP"] as const;
 /** Keyless rate API. Its `rates` are units-per-USD, so USD-per-unit is 1/value. */
 export const FX_SOURCE_URL = "https://open.er-api.com/v6/latest/USD";
 
-/** Store meta keys for the cache. */
+/** The payload's base currency. Its own rate is 1 by definition, so anything
+ *  else means the feed changed base — which would scale every price by it. */
+const FX_BASE_CURRENCY = "USD";
+
+/**
+ * How far a rate may sit from the compiled-in reference before it is read as a
+ * unit or base error rather than a market move. A unit inversion — the classic
+ * FX feed failure — lands ~155x off, not 1.5x, so a factor this generous still
+ * catches it while leaving room for a real regime change.
+ */
+const FX_SANITY_FACTOR = 10;
+
+/** Store meta keys for the cache and the refresh streak. */
 export const FX_SNAPSHOT_KEY = "fx:snapshot";
 export const FX_FETCHED_AT_KEY = "fx:fetchedAt";
+export const FX_FAILURES_KEY = "fx:failures";
 
 export type FxSource = "live" | "cached" | "static";
 
@@ -112,11 +125,6 @@ export function fxSourceName(): FxSource {
   return source;
 }
 
-/** When the rates in force were fetched, or null for the static table. */
-export function fxFetchedAt(): number | null {
-  return fetchedAt;
-}
-
 /** Age of the rates in force in hours, or null when there is no fetch to age. */
 export function fxAgeHours(now = Date.now()): number | null {
   if (fetchedAt === null) return null;
@@ -159,9 +167,13 @@ export function fxStatusLabel(hours: number, now = Date.now()): string {
  *
  * Only the convertible currencies are required; any other currency is taken
  * best-effort when present and ignored when not, so an upstream gap in a rate
- * this bot never divides by cannot sink an otherwise good payload. Rejects a
- * non-object payload, a missing `rates` map, and a required value that is not
- * a positive finite number.
+ * this bot never divides by cannot sink an otherwise good payload.
+ *
+ * Rejects a payload that is malformed (not an object, no `rates` map, a
+ * required value that is not positive and finite) and one that is *plausible but
+ * wrong*: a base that is not USD, or a rate off the compiled-in reference by
+ * more than FX_SANITY_FACTOR. Those are feed-contract failures, and accepting
+ * one would put every price in the store off by that factor silently.
  */
 export function parseFxRates(payload: unknown): Record<string, number> | null {
   if (typeof payload !== "object" || payload === null) return null;
@@ -169,10 +181,18 @@ export function parseFxRates(payload: unknown): Record<string, number> | null {
   if (typeof raw !== "object" || raw === null) return null;
   const rates = raw as Record<string, unknown>;
 
+  const plausible = (code: string, usdPerUnit: number): boolean => {
+    const ref = STATIC_FX_RATES[code];
+    if (ref === undefined) return true; // nothing to compare it against
+    return usdPerUnit <= ref * FX_SANITY_FACTOR && usdPerUnit >= ref / FX_SANITY_FACTOR;
+  };
+
   const positive = (code: string): number | undefined => {
     const perUsd = rates[code];
     if (typeof perUsd !== "number" || !Number.isFinite(perUsd) || perUsd <= 0) return undefined;
-    return 1 / perUsd;
+    if (code === FX_BASE_CURRENCY && perUsd !== 1) return undefined;
+    const usdPerUnit = 1 / perUsd;
+    return plausible(code, usdPerUnit) ? usdPerUnit : undefined;
   };
 
   const out: Record<string, number> = {};
@@ -195,11 +215,39 @@ function applyRates(parsed: Record<string, number>): void {
 }
 
 /**
+ * Mirror the durable failure streak. The count has to outlive the process: a
+ * container that restarts more often than it accumulates
+ * FX_ALERT_AFTER_FAILURES failures would otherwise never reach the threshold,
+ * and the alert would be decoration in exactly the case it exists for.
+ */
+function storeFailures(store: Store, count: number): void {
+  try {
+    store.setMeta(FX_FAILURES_KEY, String(count));
+  } catch (err) {
+    logger.warn({ err }, "fx failure count not persisted — this process alerts alone");
+  }
+}
+
+/** Adopt the durable failure streak, or start from zero when there is none. */
+function readFailures(store: Store): void {
+  let stored = 0;
+  try {
+    const raw = store.getMeta(FX_FAILURES_KEY);
+    const n = raw === undefined ? 0 : Number.parseInt(raw, 10);
+    if (Number.isInteger(n) && n >= 0) stored = n;
+  } catch {
+    // an unreadable counter is not worth failing boot over
+  }
+  consecutiveFailures = stored;
+}
+
+/**
  * Apply the cached snapshot. Returns false — leaving the static table in force —
  * when there is no snapshot, it is unreadable or malformed, or the store itself
  * is unusable: a new or unwritable database must never stop the bot serving.
  */
 export function restoreFxRates(store: Store): boolean {
+  readFailures(store);
   let raw: string | undefined;
   try {
     raw = store.getMeta(FX_SNAPSHOT_KEY);
@@ -279,12 +327,12 @@ export async function refreshFxRates(
   try {
     payload = await fetchJson();
   } catch (err) {
-    return failed("fetch failed", err, onDegraded);
+    return failed(store, "fetch failed", err, onDegraded);
   }
 
   const rates = parseFxRates(payload);
   if (rates === null) {
-    return failed("invalid payload", undefined, onDegraded);
+    return failed(store, "invalid payload", undefined, onDegraded);
   }
 
   try {
@@ -298,6 +346,7 @@ export async function refreshFxRates(
   source = "live";
   fetchedAt = now;
   consecutiveFailures = 0;
+  storeFailures(store, 0);
   logger.info({ currencies: FX_CURRENCIES.length }, "fx rates refreshed");
   return { ok: true, source: "live" };
 }
@@ -307,15 +356,22 @@ export async function refreshFxRates(
  * the degradation handler exactly once per streak (at the threshold) so an
  * endpoint that has moved does not drift prices silently forever.
  */
-function failed(reason: string, err: unknown, onDegraded?: FxDegradedHandler): FxRefreshResult {
+function failed(
+  store: Store,
+  reason: string,
+  err: unknown,
+  onDegraded?: FxDegradedHandler,
+): FxRefreshResult {
   consecutiveFailures++;
+  storeFailures(store, consecutiveFailures);
   logger.warn(
     { reason, err, consecutiveFailures },
     "fx refresh failed — keeping the rates already in force",
   );
+  // Exactly once per streak, however many processes the streak spans.
   if (onDegraded && consecutiveFailures === FX_ALERT_AFTER_FAILURES) {
     try {
-      onDegraded({ consecutiveFailures, reason, label: fxStatusLabel(0) });
+      onDegraded({ consecutiveFailures, reason });
     } catch (hookErr) {
       logger.error({ err: hookErr }, "fx degradation handler threw");
     }
@@ -326,7 +382,6 @@ function failed(reason: string, err: unknown, onDegraded?: FxDegradedHandler): F
 export interface FxDegradedInfo {
   consecutiveFailures: number;
   reason: string;
-  label: string;
 }
 
 /** Called once per failure streak, when it reaches FX_ALERT_AFTER_FAILURES. */
@@ -343,9 +398,11 @@ export interface FxBootOptions {
 
 /**
  * Boot entry: apply the cached snapshot (always, synchronously) and then
- * refresh only when the cadence says the cache is stale.
+ * refresh only when the cadence says the cache is stale. A cadence of 0 pins
+ * the built-in table outright, snapshot and all — "off" means off.
  */
 export async function bootFxRefresh(store: Store, opts: FxBootOptions): Promise<FxRefreshResult> {
+  if (opts.hours <= 0) return { ok: true, source };
   restoreFxRates(store);
   const now = opts.now?.() ?? Date.now();
   if (!fxRefreshDue(store, opts.hours, now)) return { ok: true, source };

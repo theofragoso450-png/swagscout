@@ -5,6 +5,14 @@ export type Signal = "SIGINT" | "SIGTERM";
 export interface ShutdownSteps {
   /** Stop accepting new poll rounds; safe to call twice. */
   stopPolling: () => void;
+  /**
+   * Abort the pipeline catch-up and resolve once the chunk in flight has
+   * finished. Optional — a caller that never started a catch-up has nothing to
+   * stop — but any caller that did MUST provide it: the catch-up writes through
+   * the store, so `closeStore` has to wait for it rather than yank the database
+   * out from under it.
+   */
+  stopCatchUp?: () => Promise<void>;
   /** Flush/close Discord client. */
   closeNotifier: () => Promise<void>;
   /** Stop the HTTP dashboard. */
@@ -59,6 +67,9 @@ export async function runShutdown(
 
   try {
     await run("stopPolling", steps.stopPolling);
+    // Before anything closes: the catch-up is the only step still writing on
+    // its own schedule, and its abort takes effect between chunks.
+    if (steps.stopCatchUp) await run("stopCatchUp", steps.stopCatchUp);
     await run("closeNotifier", steps.closeNotifier);
     await run("closeDashboard", steps.closeDashboard);
     await run("closeBrowser", steps.closeBrowser);
