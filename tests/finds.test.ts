@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { findsScore, parseCompReason, classifyRarity, rankFinds } from "../src/notify/finds.js";
+import { findsScore, classifyRarity, rankFinds } from "../src/notify/finds.js";
+import { compFacts } from "../src/core/reasons.js";
 import type { Deal } from "../src/types.js";
 
 const NOW = Date.parse("2026-09-18T12:00:00Z");
@@ -42,9 +43,17 @@ function thresholdDeal(hoursAgo = 1): Deal {
   };
 }
 
-describe("parseCompReason", () => {
-  it("extracts discount, sample size, and median from the comp reason text", () => {
-    expect(parseCompReason(compDeal({ discount: 39.5, sample: 22, median: 420 }).reasons)).toEqual({
+describe("compFacts", () => {
+  const structured: Deal["reasons"] = [{ kind: "comp", medianUsd: 420, sampleSize: 22 }];
+
+  it("re-derives the discount against the price in hand", () => {
+    expect(compFacts(structured, 210)).toEqual({ discountPct: 50, sampleSize: 22, medianUsd: 420 });
+    // Same median, dearer item: the discount it claims shrinks with it.
+    expect(compFacts(structured, 336)?.discountPct).toBe(20);
+  });
+
+  it("still reads the numbers out of a legacy reason's text", () => {
+    expect(compFacts(compDeal({ discount: 39.5, sample: 22, median: 420 }).reasons, 100)).toEqual({
       discountPct: 39.5,
       sampleSize: 22,
       medianUsd: 420,
@@ -52,7 +61,7 @@ describe("parseCompReason", () => {
   });
 
   it("returns null for threshold-only deals", () => {
-    expect(parseCompReason(thresholdDeal().reasons)).toBeNull();
+    expect(compFacts(thresholdDeal().reasons, 96)).toBeNull();
   });
 });
 

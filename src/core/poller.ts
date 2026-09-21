@@ -213,10 +213,7 @@ export class Poller {
             // deal.score reflects it (min_score gates read deal.score).
             this.store.upsertListing(listing);
             priceDrops++;
-            const drop: DealReason = {
-              kind: "price_drop",
-              detail: `dropped from $${existing.priceUsd.toFixed(0)} to $${listing.priceUsd.toFixed(0)}`,
-            };
+            const drop: DealReason = { kind: "price_drop", wasUsd: existing.priceUsd };
             const deal = evaluateDeal(
               listing,
               { store: this.store, compRoundUsd: this.opts.compRoundUsd },
@@ -224,7 +221,9 @@ export class Poller {
             );
             if (deal) {
               deals.push(deal);
-              this.store.recordDeal(deal);
+              // A drop is a new verdict on the same item: swap the stored deal
+              // rather than appending a second row for it.
+              this.store.replaceDeal(deal);
             }
           }
         }

@@ -46,7 +46,7 @@ export function evaluateDeal(
     priceUsd: candidateUsd,
   });
   if (threshold) {
-    reasons.push({ kind: "threshold", detail: threshold });
+    reasons.push({ kind: "threshold", capUsd: threshold.maxUsd, note: threshold.note });
   }
 
   // 2) Cross-market comps (phase-2 engine, same codebase)
@@ -71,7 +71,8 @@ export function evaluateDeal(
       compMatch.roundUsd = roundUsd;
       reasons.push({
         kind: "comp",
-        detail: `${compMatch.discountPct}% below ${compMatch.sampleSize}-listing median ($${compMatch.medianUsd.toFixed(0)})`,
+        medianUsd: compMatch.medianUsd,
+        sampleSize: compMatch.sampleSize,
       });
       comp = compMatch;
     }

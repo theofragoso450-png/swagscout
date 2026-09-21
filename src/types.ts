@@ -74,9 +74,36 @@ export interface Deal {
   comp?: CompMatch;
 }
 
+/**
+ * Why a listing is a deal, as the decision's parameters rather than a rendered
+ * sentence.
+ *
+ * Nothing price-derived is stored: the item's own USD price is re-derived at
+ * read time from its native price, so prose baked in at ingest printed a
+ * different number than the card beside it. Surfaces render these through
+ * core/reasons.ts `formatReason(reason, priceUsd)`, which supplies the price
+ * they are actually showing. The parameters below are the facts that are *not*
+ * derivable — the rule's cap, the comparison set's median — plus the one
+ * historical price a drop names.
+ */
 export interface DealReason {
   kind: "threshold" | "comp" | "price_drop";
-  detail: string;
+  /** threshold: the rule's USD cap. */
+  capUsd?: number;
+  /** threshold: the rule's human note. */
+  note?: string;
+  /** comp: the comparison set's median, a fact about the market at decision time. */
+  medianUsd?: number;
+  /** comp: how many listings the median was drawn from. */
+  sampleSize?: number;
+  /** price_drop: the USD price observed before the drop. */
+  wasUsd?: number;
+  /**
+   * A rendered line, for reasons with no parameters: every deal stored before
+   * reasons carried them, plus callers that supply prose directly. There is
+   * nothing to re-render in that case, so it is used as recorded.
+   */
+  detail?: string;
 }
 
 export interface PollResult {

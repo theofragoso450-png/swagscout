@@ -1,4 +1,5 @@
 import type { Deal } from "../types.js";
+import { compFacts } from "../core/reasons.js";
 
 /**
  * "Finds of the day" ranking — surfaces the most notable comp-backed deals,
@@ -19,26 +20,9 @@ export interface FindRank {
   rarity: Rarity;
 }
 
-export interface CompInfo {
-  discountPct: number;
-  sampleSize: number;
-  medianUsd: number;
-}
-
-/** Pull the structured comp numbers back out of the stored reason text. */
-export function parseCompReason(reasons: Deal["reasons"]): CompInfo | null {
-  for (const r of reasons) {
-    const m = /(\d+(?:\.\d+)?)% below (\d+)-listing median \(\$(\d+(?:\.\d+)?)\)/.exec(r.detail);
-    if (m) {
-      return { discountPct: Number(m[1]), sampleSize: Number(m[2]), medianUsd: Number(m[3]) };
-    }
-  }
-  return null;
-}
-
 /** 0–30 by discount depth, 0–10 by comp-sample confidence, 0–20 by price class. */
 export function findsScore(deal: Deal): number {
-  const comp = parseCompReason(deal.reasons);
+  const comp = compFacts(deal.reasons, deal.listing.priceUsd);
   if (!comp) return 0;
   const rarityPts = Math.min(30, Math.round(comp.discountPct * 0.6));
   const samplePts = Math.min(10, Math.round(Math.log2(comp.sampleSize) * 2));
