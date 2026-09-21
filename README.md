@@ -1,5 +1,7 @@
 # SwagScout 🧥📡
 
+> **New here? Never written code?** Follow [INSTALL.md](INSTALL.md) — a plain-language, step-by-step setup guide (Discord bot + Docker or Node) that assumes nothing.
+
 Self-hosted archive-fashion deal bot, inspired by [swagsearch.io](https://swagsearch.io/). It continuously polls **five resale markets**, detects **underpriced** archive pieces two different ways, and pushes rich **Discord alerts** with proxy-buying links — plus a live web dashboard.
 
 ## Markets
