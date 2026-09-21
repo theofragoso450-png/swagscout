@@ -7,8 +7,8 @@ import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
 } from "discord.js";
-import type { Deal, PollResult } from "../types.js";
-import { ALL_MARKETS, MARKET_LABEL } from "../types.js";
+import type { Deal, MarketHealth, PollResult } from "../types.js";
+import { MARKET_LABEL } from "../types.js";
 import { BRANDS } from "../config/brands.js";
 import type { Store } from "../core/store.js";
 import { logger } from "../logger.js";
@@ -208,9 +208,20 @@ export class DiscordNotifier {
     const subs = this.store.listSubscriptions().length;
     const tracked = this.store.recentListings(24 * 14).length;
     const deals = this.store.recentDeals(["all"], 1).length;
+    // Market liveness: ✓ answered, ! last attempt failed, ? never recorded.
+    const ago = (ms: number) => {
+      const m = Math.round((Date.now() - ms) / 60_000);
+      return m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
+    };
+    const mark = (h: MarketHealth) => (h.lastRoundOk === true ? "✓" : h.lastRoundOk === false ? "!" : "?");
+    const marketLines = this.store.marketHealth().map((h) => {
+      const when = h.lastRoundAt ? ` last round ${ago(h.lastRoundAt)} ago` : " never polled";
+      return `   ${mark(h)} ${MARKET_LABEL[h.market]} —${when}, ${h.rows24h} rows/24h`;
+    });
     await i.reply({
       content: [
-        `📡 Markets: ${ALL_MARKETS.map((m) => MARKET_LABEL[m]).join(", ")}`,
+        `📡 Markets:`,
+        ...marketLines,
         `👀 Subscriptions: ${subs}`,
         `🗂 Listings tracked (14d): ${tracked}`,
         deals > 0 ? "💾 Deal history: available" : "💾 Deal history: empty",

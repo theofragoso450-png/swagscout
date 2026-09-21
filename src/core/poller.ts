@@ -260,9 +260,23 @@ export class Poller {
         }
       }
 
+      // Market health: recorded per tick, not per cycle — a tick is the finest
+      // honest granularity of "is this market answering" (30-90s), and a full
+      // query cycle can be an hour away. Circuit-open ticks return earlier, so
+      // they never fake liveness.
+      this.store.recordMarketRound(market, {
+        at: new Date().toISOString(),
+        ok: true,
+        queries: 1,
+        items: fetched,
+      });
       rt.consecutiveFailures = 0;
     } catch (err) {
       rt.consecutiveFailures++;
+      // Market health: the tick failed — mark it so a silently dead market
+      // shows "!" within one poll interval instead of keeping its last good
+      // answer forever.
+      this.store.recordMarketRound(market, { at: new Date().toISOString(), ok: false, queries: 0, items: 0 });
       // The failed term's outcome is now unknown — drop its coverage flag so
       // its brand stays uncovered until the term completes a short page again.
       // Other terms' fresh observations stay valid.

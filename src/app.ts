@@ -15,7 +15,7 @@ import { GrailedAdapter } from "./markets/grailed.js";
 import { EbayAdapter } from "./markets/ebay.js";
 import { MercariAdapter } from "./markets/mercari.js";
 import { RakumaAdapter } from "./markets/rakuma.js";
-import { ALL_MARKETS } from "./types.js";
+import type { MarketHealth } from "./types.js";
 
 /**
  * The composition: env → store → adapters → notifier → FX → catch-up →
@@ -190,12 +190,10 @@ function statsLine(store: Store, env: Env): string {
   const listings = store.recentListings(24 * 14);
   const deals = store.recentDeals(["all"], 1000);
   // Busiest markets lead; zeros trail so a stalled market is still visible.
-  const perMarket = ALL_MARKETS.map((m) => ({
-    m,
-    c: listings.filter((l) => l.market === m).length,
-  })).sort((a, b) => b.c - a.c);
+  const health = [...store.marketHealth()].sort((a, b) => b.rows24h - a.rows24h);
+  const mark = (m: MarketHealth) => (m.lastRoundOk === true ? "✓" : m.lastRoundOk === false ? "!" : "?");
   const fmt = (n: number) => n.toLocaleString("en-US");
-  return `${fmt(listings.length)} listings · ${fmt(deals.length)} deals · last 14d · ${perMarket
-    .map((p) => `${p.m} ${fmt(p.c)}`)
+  return `${fmt(listings.length)} listings · ${fmt(deals.length)} deals · last 14d · ${health
+    .map((m) => `${m.market}${mark(m)} ${fmt(m.rows24h)}/24h`)
     .join(" · ")} · FX ${fxStatusLabel(env.fxRefreshHours)}`;
 }

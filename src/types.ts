@@ -2,6 +2,21 @@ export type MarketId = "yahoo" | "grailed" | "ebay" | "mercari" | "rakuma";
 
 export const ALL_MARKETS: MarketId[] = ["yahoo", "grailed", "ebay", "mercari", "rakuma"];
 
+/** Per-market liveness, as reported by the dashboard status line and /status. */
+export interface MarketHealth {
+  market: MarketId;
+  /** Epoch ms of the last completed query cycle; null = never recorded. */
+  lastRoundAt: number | null;
+  /** Whether that cycle's fetch succeeded; null = no round recorded. */
+  lastRoundOk: boolean | null;
+  /** Listings that cycle fetched. */
+  lastRoundItems: number | null;
+  /** Listing rows with fresh ingest data (updatedAt) in the last 24h. */
+  rows24h: number;
+  /** Timestamp of the newest row in the last 24h; null = none. */
+  latestListingAt: string | null;
+}
+
 export const MARKET_LABEL: Record<MarketId, string> = {
   yahoo: "Yahoo Auctions JP",
   grailed: "Grailed",
