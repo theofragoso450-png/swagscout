@@ -113,6 +113,12 @@ describe("a price drop replaces the listing's deal", () => {
     expect(drop.priceDrops).toBe(1);
     expect(drop.deals).toHaveLength(1);
     expect(drop.deals[0]?.reasons.some((r) => r.kind === "price_drop")).toBe(true);
+    // The from-price is stored native (¥12,000), not as a USD figure, so a later
+    // FX move can never push the "from" number past the "to" number.
+    const dropReason = drop.deals[0]?.reasons.find((r) => r.kind === "price_drop");
+    expect(dropReason?.wasPrice).toBe(12_000);
+    expect(dropReason?.wasCurrency).toBe("JPY");
+    expect(dropReason?.wasUsd).toBeUndefined();
     expect(dealRows()).toBe(1);
 
     // Same price: nothing to say, and no row churn.

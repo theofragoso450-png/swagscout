@@ -5,6 +5,8 @@ import { sleep } from "./http.js";
 import type { DealReason, Listing, MarketId } from "../types.js";
 import type { Store, StoredListing } from "./store.js";
 import { PIPELINE_VERSION } from "./pipeline.js";
+import { round2 } from "./fx.js";
+import { recordedWasUsd } from "./reasons.js";
 import { logger } from "../logger.js";
 
 /** Max stale rows evaluated per pass; anything beyond waits for the next pass. */
@@ -112,7 +114,7 @@ export function recomputeStale(
       const fresh = evaluateDeal(
         toListing(row, brand, size),
         { store, compRoundUsd: ctx.compRoundUsd },
-        carried(prior),
+        carried(prior, row),
       );
       const had = store.dealExistsFor(row.key);
       if (fresh && had) {
@@ -267,8 +269,25 @@ export async function catchUpPipeline(
  * only ever observed once — dropping it would delete information the pass
  * cannot recreate (and with it the deal's drop score).
  */
-function carried(prior: DealReason[]): DealReason[] {
-  return prior.filter((r) => r.kind === "price_drop");
+function carried(prior: DealReason[], row: StoredListing): DealReason[] {
+  return prior.filter((r) => r.kind === "price_drop").map((r) => nativeFromPrice(r, row));
+}
+
+/**
+ * A drop recorded before reasons carried native amounts holds only a USD
+ * from-price (structured or in prose), which a later FX move could push past the
+ * "to" price and invert the sentence. The row still knows the rate it was written
+ * under, so recover the native from-price here: the recorded USD was the old
+ * price at that same rate. Exact while the rate has not moved since the drop;
+ * best-effort otherwise, and an unreadable rate leaves the reason as recorded.
+ */
+function nativeFromPrice(r: DealReason, row: StoredListing): DealReason {
+  if (r.wasPrice !== undefined) return r;
+  const wasUsd = recordedWasUsd(r);
+  if (wasUsd === undefined) return r;
+  const rate = row.price > 0 ? row.priceUsd / row.price : 0;
+  if (!(rate > 0)) return r;
+  return { kind: "price_drop", wasPrice: round2(wasUsd / rate), wasCurrency: row.currency };
 }
 
 /**

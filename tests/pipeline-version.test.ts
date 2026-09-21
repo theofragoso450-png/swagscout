@@ -139,8 +139,14 @@ describe("recomputeStale policy", () => {
 
     expect(stats.dealsUpdated).toBe(1);
     const d = store.recentDeals(["cdg"], 5)[0]!;
-    // The observed event survives; nothing about it is stored elsewhere.
-    expect(d.reasons.find((r) => r.kind === "price_drop")?.wasUsd).toBe(20);
+    // The observed event survives; nothing about it is stored elsewhere. Its USD
+    // from-price is recovered to the native amount (¥3,100 at the row's rate) so
+    // a later FX move cannot push the "from" past the "to".
+    const drop = d.reasons.find((r) => r.kind === "price_drop");
+    expect(drop?.wasUsd).toBeUndefined();
+    expect(drop?.wasCurrency).toBe("JPY");
+    expect(drop!.wasPrice!).toBeGreaterThan(3095);
+    expect(drop!.wasPrice!).toBeLessThan(3105);
     // While every reason is re-parameterised: no rendered text is written back.
     expect(d.reasons.every((r) => r.detail === undefined)).toBe(true);
   });

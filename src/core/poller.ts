@@ -213,7 +213,13 @@ export class Poller {
             // deal.score reflects it (min_score gates read deal.score).
             this.store.upsertListing(listing);
             priceDrops++;
-            const drop: DealReason = { kind: "price_drop", wasUsd: existing.priceUsd };
+            // Native from-price: rendered against the live rate later, so an FX
+            // move cannot make the "from" number drift past the "to" number.
+            const drop: DealReason = {
+              kind: "price_drop",
+              wasPrice: existing.price,
+              wasCurrency: existing.currency,
+            };
             const deal = evaluateDeal(
               listing,
               { store: this.store, compRoundUsd: this.opts.compRoundUsd },

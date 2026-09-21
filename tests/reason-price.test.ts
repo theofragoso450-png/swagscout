@@ -7,6 +7,7 @@ import { normalizeListing } from "../src/core/normalize.js";
 import { startDashboard, type DashboardServer } from "../src/web/server.js";
 import { formatReason } from "../src/core/reasons.js";
 import { formatUsd } from "../src/core/money.js";
+import { evaluateDeal } from "../src/core/score.js";
 import { buildDealEmbed, type EmbedPayload } from "../src/notify/embeds.js";
 import * as fx from "../src/core/fx.js";
 import type { DealReason, Listing } from "../src/types.js";
@@ -131,6 +132,84 @@ describe("formatReason", () => {
     expect(formatReason({ kind: "price_drop", detail: "dropped from $187 to $174" }, 150)).toBe(
       "dropped from $187 to $150",
     );
+  });
+});
+
+/**
+ * A reference stored native is converted at the rate in force — the same rate the
+ * card's price is derived at — so the two sides of the comparison share a vintage
+ * and an FX move cannot invert the sentence. A USD reference frozen at decision
+ * time is what could read "dropped from $10 to $11" or "-3% below a median".
+ */
+describe("native references compare like-for-like", () => {
+  it("keeps a drop a drop through an FX move", async () => {
+    // ¥12,000 → ¥10,000. At the static rate (JPY 1/155) that is $77.42 → $64.52.
+    const drop: DealReason = { kind: "price_drop", wasPrice: 12_000, wasCurrency: "JPY" };
+    expect(formatReason(drop, 10_000 / 155)).toBe("dropped from $77.42 to $64.52");
+
+    // The yen strengthens to 1/200. Both sides move together, so it stays a drop
+    // — the "from" can never drift past the "to".
+    await fx.refreshFxRates(store, async () => ({ base_code: "USD", rates: { USD: 1, JPY: 200 } }));
+    const line = formatReason(drop, 10_000 / 200);
+    expect(line).toBe("dropped from $60 to $50");
+    const [from, to] = line.match(/\$[\d.]+/g)!.map((s) => Number(s.slice(1)));
+    expect(from).toBeGreaterThan(to);
+  });
+
+  it("keeps a comp below its median through an FX move", async () => {
+    const comp: DealReason = { kind: "comp", medianPrice: 20_000, medianCurrency: "JPY", sampleSize: 12 };
+    expect(formatReason(comp, 10_000 / 155)).toBe("50% below 12-listing median ($129.03)");
+
+    await fx.refreshFxRates(store, async () => ({ base_code: "USD", rates: { USD: 1, JPY: 200 } }));
+    const line = formatReason(comp, 10_000 / 200);
+    expect(line).toBe("50% below 12-listing median ($100)");
+    // The discount is rate-invariant, so it can never read as a negative "below".
+    expect(Number(/^([\d.]+)%/.exec(line)![1])).toBeGreaterThan(0);
+  });
+
+  it("renders a native comp at the rate in force on the real card", async () => {
+    seed(listing("r7", 10_000), [
+      { kind: "comp", medianPrice: 20_000, medianCurrency: "JPY", sampleSize: 12 },
+    ]);
+    server = startDashboard(store, 0, () => "test");
+    const port = await server.start();
+
+    const item = (await deals(port))[0]!;
+    expect(item.priceLabel).toBe("$64.52");
+    expect(item.reasons[0]!.detail).toBe("50% below 12-listing median ($129.03)");
+  });
+
+  it("stores a comp median natively when scoring, never as USD", () => {
+    // A comp set in the candidate's own $50 bucket: candidate $79, comps $124.
+    for (const id of ["c1", "c2", "c3"]) {
+      store.upsertListing(
+        normalizeListing({
+          market: "grailed",
+          id,
+          title: "kapital bandana jacket",
+          price: 124,
+          currency: "USD",
+          url: `https://example.com/${id}`,
+        }),
+      );
+    }
+    const candidate = normalizeListing({
+      market: "yahoo",
+      id: "cand",
+      title: "kapital bandana jacket",
+      price: 12_245,
+      currency: "JPY",
+      url: "https://auctions.yahoo.co.jp/jp/auction/cand",
+    });
+
+    const deal = evaluateDeal(candidate, { store, compRoundUsd: 50 })!;
+    const comp = deal.reasons.find((r) => r.kind === "comp")!;
+    // Native to the candidate's currency — ¥19,220, not a frozen $124.
+    expect(comp.medianPrice).toBe(19_220);
+    expect(comp.medianCurrency).toBe("JPY");
+    expect(comp.medianUsd).toBeUndefined();
+    // And it still renders the same number it was derived from.
+    expect(formatReason(comp, deal.listing.priceUsd)).toBe("36.3% below 3-listing median ($124)");
   });
 });
 

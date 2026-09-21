@@ -78,25 +78,31 @@ export interface Deal {
  * Why a listing is a deal, as the decision's parameters rather than a rendered
  * sentence.
  *
- * Nothing price-derived is stored: the item's own USD price is re-derived at
- * read time from its native price, so prose baked in at ingest printed a
- * different number than the card beside it. Surfaces render these through
- * core/reasons.ts `formatReason(reason, priceUsd)`, which supplies the price
- * they are actually showing. The parameters below are the facts that are *not*
- * derivable — the rule's cap, the comparison set's median — plus the one
- * historical price a drop names.
+ * Price-derived values are stored NATIVE — the amount plus the currency it was
+ * drawn from — never as a USD figure. A USD amount frozen at decision time
+ * drifts against the card's own price the moment the rate moves, which could
+ * invert the sentence it is part of ("dropped from $10 to $11", "-3% below a
+ * median"). core/reasons.ts converts the native amount at the rate in force —
+ * the same rate the displayed price is derived at — so the two sides of every
+ * comparison are on one vintage by construction.
  */
 export interface DealReason {
   kind: "threshold" | "comp" | "price_drop";
-  /** threshold: the rule's USD cap. */
+  /** threshold: the rule's USD cap (a configured number, not a conversion). */
   capUsd?: number;
   /** threshold: the rule's human note. */
   note?: string;
-  /** comp: the comparison set's median, a fact about the market at decision time. */
-  medianUsd?: number;
+  /** comp: the comparison set's median, native to `medianCurrency`. */
+  medianPrice?: number;
+  medianCurrency?: string;
   /** comp: how many listings the median was drawn from. */
   sampleSize?: number;
-  /** price_drop: the USD price observed before the drop. */
+  /** price_drop: the price observed before the drop, native to `wasCurrency`. */
+  wasPrice?: number;
+  wasCurrency?: string;
+  /** comp: a USD median recorded before reasons carried native amounts. */
+  medianUsd?: number;
+  /** price_drop: a USD from-price recorded before reasons carried native amounts. */
   wasUsd?: number;
   /**
    * A rendered line, for reasons with no parameters: every deal stored before

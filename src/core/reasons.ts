@@ -1,3 +1,4 @@
+import { round2, toUsd } from "./fx.js";
 import { formatUsd } from "./money.js";
 import type { DealReason } from "../types.js";
 
@@ -15,6 +16,11 @@ import type { DealReason } from "../types.js";
  * before reasons were structured, and callers that supply prose directly.
  * Nothing can be re-rendered for those, so the text stands as recorded.
  *
+ * A comp median and a drop's from-price are stored NATIVE and converted here at
+ * the rate in force — the same rate the card's price is derived at — so the two
+ * sides of the comparison share a vintage and an FX move can never invert the
+ * sentence. Reasons stored before native amounts fall back to their USD figure.
+ *
  * Money is written by `formatUsd` (core/money.ts), the one policy every surface
  * shares, so the number a reason names is the number printed beside it.
  */
@@ -23,15 +29,42 @@ export function formatReason(r: DealReason, priceUsd: number): string {
     const note = r.note ? ` — ${r.note}` : "";
     return `price ${formatUsd(priceUsd)} ≤ ${formatUsd(r.capUsd)}${note}`;
   }
-  if (r.kind === "comp" && r.medianUsd !== undefined && r.sampleSize !== undefined) {
-    const pct = compDiscountPct(priceUsd, r.medianUsd);
-    return `${pct}% below ${r.sampleSize}-listing median (${formatUsd(r.medianUsd)})`;
+  if (r.kind === "comp") {
+    const medianUsd = nativeUsd(r.medianPrice, r.medianCurrency) ?? r.medianUsd;
+    if (medianUsd !== undefined && r.sampleSize !== undefined) {
+      const pct = compDiscountPct(priceUsd, medianUsd);
+      return `${pct}% below ${r.sampleSize}-listing median (${formatUsd(medianUsd)})`;
+    }
   }
   if (r.kind === "price_drop") {
-    const was = r.wasUsd ?? legacyWasUsd(r.detail);
+    const was = nativeUsd(r.wasPrice, r.wasCurrency) ?? recordedWasUsd(r);
     if (was !== undefined) return `dropped from ${formatUsd(was)} to ${formatUsd(priceUsd)}`;
   }
   return r.detail ?? "";
+}
+
+/**
+ * A stored reference converted to USD at the rate in force — the same rate the
+ * price it is compared against was derived at. Falls back to undefined (so the
+ * caller uses the recorded USD) when there is no native amount or the currency
+ * cannot be converted.
+ */
+function nativeUsd(native: number | undefined, currency: string | undefined): number | undefined {
+  if (native === undefined || currency === undefined) return undefined;
+  try {
+    return round2(toUsd(native, currency));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The USD from-price a reason records before any native conversion: the stored
+ * `wasUsd`, or the figure written into a drop line from before reasons carried
+ * their numbers. Shared with the rebuild, which converts it to a native amount.
+ */
+export function recordedWasUsd(r: DealReason): number | undefined {
+  return r.wasUsd ?? legacyWasUsd(r.detail);
 }
 
 /** The from-price recorded in a drop line written before reasons carried their
@@ -62,18 +95,20 @@ const LEGACY_DROP = /dropped from \$(\d+(?:\.\d+)?)/;
 
 /**
  * The comp facts a deal's reasons hold, with the discount re-derived against
- * `priceUsd` so a ranking and a card agree about today's discount. Falls back to
- * the recorded text when a reason has no parameters, which is how deals stored
- * before this change still score.
+ * `priceUsd` so a ranking and a card agree about today's discount. A native
+ * median is converted at the rate in force, same as the card's price. Falls back
+ * to the recorded text when a reason has no parameters, which is how deals
+ * stored before this change still score.
  */
 export function compFacts(reasons: readonly DealReason[], priceUsd: number): CompFacts | null {
   for (const r of reasons) {
     if (r.kind !== "comp") continue;
-    if (r.medianUsd !== undefined && r.sampleSize !== undefined) {
+    const medianUsd = nativeUsd(r.medianPrice, r.medianCurrency) ?? r.medianUsd;
+    if (medianUsd !== undefined && r.sampleSize !== undefined) {
       return {
-        discountPct: compDiscountPct(priceUsd, r.medianUsd),
+        discountPct: compDiscountPct(priceUsd, medianUsd),
         sampleSize: r.sampleSize,
-        medianUsd: r.medianUsd,
+        medianUsd,
       };
     }
     const m = LEGACY_COMP.exec(r.detail ?? "");
