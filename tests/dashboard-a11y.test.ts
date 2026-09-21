@@ -57,6 +57,29 @@ describe("dashboard accessibility contract", () => {
     }
   });
 
+  it("gives every card image an alt attribute, so no unnamed graphic is announced", async () => {
+    const html = await page(await boot());
+    // both branches — the real thumbnail and the placeholder — must carry alt;
+    // a missing attribute exposes an unnamed `image` node in the a11y tree
+    expect(html).toContain('alt="" loading="lazy"');
+    expect(html).toContain("alt=''");
+  });
+
+  it("omits lang entirely for non-Japanese titles rather than writing lang=\"\"", async () => {
+    const html = await page(await boot());
+    // an empty lang marks the language explicitly *unknown*, overriding the
+    // document's "en", so the attribute must be conditional
+    expect(html).toContain('target="_blank"${d.titleLang ? ` lang="${escapeHtml(d.titleLang)}"` : ""}');
+    expect(html).not.toContain('lang="${escapeHtml(d.titleLang || "")}"');
+  });
+
+  it("gives card, proxy and action links a visible focus treatment", async () => {
+    const html = await page(await boot());
+    expect(html).toContain(".title a:focus-visible");
+    expect(html).toContain(".proxies a:focus-visible");
+    expect(html).toContain(".link:focus-visible");
+  });
+
   it("exposes connection state as a polite live region instead of color alone", async () => {
     const html = await page(await boot());
     // the dot is decorative; markLive() announces state through #live

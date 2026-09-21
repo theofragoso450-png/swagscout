@@ -66,6 +66,7 @@ const PAGE = `
   select, input { background:#161b22; color:#e6edf3; border:1px solid #30363d; border-radius:8px; padding:7px 10px; font-size:13px; transition:border-color .15s, background .15s; }
   select:hover, input:hover { border-color:#3d444d; }
   select:focus-visible, input:focus-visible { outline:none; border-color:#3fb950; box-shadow:0 0 0 3px rgba(63,185,80,.13); }
+  .title a:focus-visible, .proxies a:focus-visible, .link:focus-visible { outline:2px solid #3fb950; outline-offset:2px; border-radius:4px; }
   select { cursor:pointer; }
   main { padding: 18px 28px 28px; }
   .deal { border:1px solid #21262d; border-radius:12px; padding:14px 16px; margin-bottom:12px; display:flex; gap:14px; background:#161b22; transition:border-color .15s, transform .15s; }
@@ -231,9 +232,9 @@ const PAGE = `
     const reasons = (d.reasons||[]).filter(r => !isFind || r.kind === "comp").map(r => "• " + r.detail).join(" &nbsp; ");
     const proxies = Object.entries(d.proxy||{}).map(([k,v]) => \`<a href="\${escapeHtml(safeUrl(v))}" target="_blank">\${escapeHtml(k[0].toUpperCase()+k.slice(1))}</a>\`).join("");
     return \`<div class="deal">
-      \${d.imageUrl ? \`<img src="\${escapeHtml(safeUrl(d.imageUrl))}" loading="lazy" onerror="this.classList.add('imgph');this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img class='img imgph' src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' alt=''>"}
+      \${d.imageUrl ? \`<img src="\${escapeHtml(safeUrl(d.imageUrl))}" alt="" loading="lazy" onerror="this.classList.add('imgph');this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img class='img imgph' src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' alt=''>"}
       <div class="meta">
-        <div class="title">\${d.rank != null ? \`<span class="tier tier-\${escapeHtml(d.tier)}">\${escapeHtml(d.findLabel)}</span>\` : ""}<a href="\${escapeHtml(safeUrl(d.url))}" target="_blank" lang="\${escapeHtml(d.titleLang || "")}">\${escapeHtml(d.title)}</a></div>
+        <div class="title">\${d.rank != null ? \`<span class="tier tier-\${escapeHtml(d.tier)}">\${escapeHtml(d.findLabel)}</span>\` : ""}<a href="\${escapeHtml(safeUrl(d.url))}" target="_blank"\${d.titleLang ? \` lang="\${escapeHtml(d.titleLang)}"\` : ""}>\${escapeHtml(d.title)}</a></div>
         <div class="row">
           <span class="badge">\${escapeHtml(d.marketLabel)}</span>
           \${d.size ? \`<span class="badge size">\${escapeHtml(d.size)}</span>\` : ""}

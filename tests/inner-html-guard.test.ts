@@ -47,6 +47,9 @@ const ALLOWED_PREFIXES = [
   "!isFind && d.endsInMin != null",
   // missingForLabel: server-composed via fmtDuration from the store's ISO stamp
   "!isFind && d.missingForLabel ?",
+  // titleLang: a static-markup ternary (` lang="ja"` / absent) whose embedded
+  // value token is escapeHtml(d.titleLang) and is verified by the nested pass
+  "d.titleLang ?",
 ];
 
 export function isUnsafe(token: string): boolean {
