@@ -1,7 +1,7 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import type { Deal, DealReason, Listing, MarketId } from "../types.js";
+import { ALL_MARKETS, type Deal, type DealReason, type Listing, type MarketHealth, type MarketId } from "../types.js";
 import { proxyLinks } from "../proxy/links.js";
 import { PIPELINE_VERSION } from "./pipeline.js";
 import { fxRatesSnapshot, jpyUsdRate, round2, usdFrom } from "./fx.js";
@@ -83,6 +83,8 @@ export class Store {
   private listSubStmt: StatementSync;
   private setMetaStmt: StatementSync;
   private getMetaStmt: StatementSync;
+  /** Per-market 24h row counts + newest-row timestamp (see marketHealth). */
+  private marketActivityStmt: StatementSync;
   private insertDealStmt: StatementSync;
   private recentDealsStmt: StatementSync;
   private recentDealsByBrandStmt: StatementSync;
@@ -205,6 +207,9 @@ export class Store {
       "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     );
     this.getMetaStmt = this.db.prepare("SELECT value FROM meta WHERE key = ?");
+    this.marketActivityStmt = this.db.prepare(
+      "SELECT market, COUNT(*) AS rows24h, MAX(foundAt) AS latest FROM listings WHERE updatedAt >= ? GROUP BY market",
+    );
     this.insertDealStmt = this.db.prepare(`
       INSERT INTO deals (listingKey, market, marketId, title, brandKey, priceUsd, url, reasons, score, foundAt, pipelineVersion)
       VALUES (@listingKey, @market, @marketId, @title, @brandKey, @priceUsd, @url, @reasons, @score, @foundAt, @pipelineVersion)
@@ -695,6 +700,52 @@ export class Store {
   /** Test seam: forget every transition (fresh start for a scenario). */
   resetMissing(): void {
     this.clearAllMissingStmt.run();
+  }
+
+  // ── market health ────────────────────────────────────────────────────────
+
+  /**
+   * Record the outcome of one market's query cycle (called by the poller at
+   * cycle wrap). Ok means the fetch itself succeeded; queries/items describe
+   * that cycle. Stored in the meta table under `round:<market>` keys.
+   */
+  recordMarketRound(market: MarketId, round: { at: string; ok: boolean; queries: number; items: number }): void {
+    this.setMeta(`round:${market}:at`, round.at);
+    this.setMeta(`round:${market}:ok`, round.ok ? "1" : "0");
+    this.setMeta(`round:${market}:queries`, String(round.queries));
+    this.setMeta(`round:${market}:items`, String(round.items));
+  }
+
+  /**
+   * Per-market liveness for the dashboard status line and /status: when the
+   * market last completed a query cycle, whether that cycle's fetch succeeded,
+   * and how many listing rows it touched in the last 24h. A market with no
+   * recorded round (disabled, never polled, or pre-feature data) reports nulls
+   * rather than being mistaken for a working one.
+   */
+  marketHealth(now = Date.now()): MarketHealth[] {
+    const since24h = new Date(now - 24 * 3600_000).toISOString();
+    // Grouped in SQL, not piggybacked on recentListings — that reader caps at
+    // 2000 price-sorted rows, which would undercount a healthy store.
+    const counts = new Map<MarketId, { rows: number; latest: string | null }>();
+    for (const r of this.marketActivityStmt.all(since24h) as unknown as Array<{
+      market: MarketId;
+      rows24h: number;
+      latest: string | null;
+    }>) {
+      counts.set(r.market, { rows: Number(r.rows24h), latest: r.latest });
+    }
+    return ALL_MARKETS.map((market) => {
+      const at = this.getMeta(`round:${market}:at`);
+      return {
+        market,
+        lastRoundAt: at ? Date.parse(at) : null,
+        lastRoundOk: at ? this.getMeta(`round:${market}:ok`) === "1" : null,
+        lastRoundItems: at ? Number(this.getMeta(`round:${market}:items`) ?? 0) : null,
+        rows24h: counts.get(market)?.rows ?? 0,
+        latestListingAt: counts.get(market)?.latest ?? null,
+      };
+    });
   }
 
   // ── meta ─────────────────────────────────────────────────────────────────

@@ -382,6 +382,8 @@ export function startDashboard(
       markets: ALL_MARKETS,
       rules: THRESHOLD_RULES.length,
       brands: BRANDS.length,
+      /** Per-market liveness: last completed round, its outcome, 24h row counts. */
+      marketHealth: store.marketHealth(),
     };
   });
 
