@@ -103,7 +103,7 @@ describe("mercari item mapping (DOM path and API path must agree)", () => {
     }
     const apiAdapter = new MercariAdapter(new StubHttp() as never);
     const api = apiAdapter as unknown as {
-      searchViaApi(q: string, max: number): Promise<Listing[]>;
+      searchViaApi(q: string, max: number): Promise<Listing[] | null>;
     };
     const [l] = await api.searchViaApi("cdg", 40);
     expect(l).toBeDefined();

@@ -27,8 +27,11 @@ export class YahooAuctionsAdapter implements MarketAdapter {
       const html = await this.http.getText(url, { timeoutMs: 15_000 });
       return this.parse(html).slice(0, max);
     } catch (err) {
+      // Log and rethrow: a transport failure must reach the poller's catch so
+      // market health stamps ok:false and the failed term's coverage flag is
+      // dropped — returning [] made a dead market read as a healthy empty one.
       logger.warn({ err, market: this.id, query }, "yahoo search failed");
-      return [];
+      throw err;
     }
   }
 

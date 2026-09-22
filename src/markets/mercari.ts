@@ -60,15 +60,19 @@ export class MercariAdapter implements MarketAdapter {
     const max = opts?.maxItems ?? 40;
     // Browser-first: the SPA route works reliably in a real browser, while the
     // public JSON API version drifts (currently returns UnsupportedVersion).
-    const items = await this.searchViaBrowser(query, max);
-    if (items.length === 0) {
-      logger.info({ market: this.id, query }, "mercari browser empty, trying json api");
-      return (await this.searchViaApi(query, max)).slice(0, max);
-    }
-    return items.slice(0, max);
+    // Layers return null on FAILURE (transport/render error) and [] only for a
+    // legitimately empty result, so a total outage propagates instead of
+    // masquerading as "no listings found" (see yahooAuctions.ts rethrow note).
+    const browserItems = await this.searchViaBrowser(query, max);
+    if (browserItems !== null) return browserItems.slice(0, max);
+    logger.info({ market: this.id, query }, "mercari browser layer failed, trying json api");
+    const apiItems = await this.searchViaApi(query, max);
+    if (apiItems !== null) return apiItems.slice(0, max);
+    throw new Error("mercari: browser and json api layers both failed");
   }
 
-  private async searchViaApi(query: string, max: number): Promise<Listing[]> {
+  /** null = the layer failed; [] = the market genuinely has no results. */
+  private async searchViaApi(query: string, max: number): Promise<Listing[] | null> {
     try {
       const params = new URLSearchParams({
         keyword: query,
@@ -110,11 +114,12 @@ export class MercariAdapter implements MarketAdapter {
         });
     } catch (err) {
       logger.debug({ err, market: this.id }, "mercari json api failed");
-      return [];
+      return null;
     }
   }
 
-  private async searchViaBrowser(query: string, max: number): Promise<Listing[]> {
+  /** null = the layer failed; [] = the market genuinely has no results. */
+  private async searchViaBrowser(query: string, max: number): Promise<Listing[] | null> {
     try {
       const html = await renderPage(this.searchUrl(query), {
         executablePath: this.playwrightExecutablePath,
@@ -125,7 +130,7 @@ export class MercariAdapter implements MarketAdapter {
       return this.parseHtml(html).slice(0, max);
     } catch (err) {
       logger.debug({ err, market: this.id, query }, "mercari browser fallback failed");
-      return [];
+      return null;
     }
   }
 
