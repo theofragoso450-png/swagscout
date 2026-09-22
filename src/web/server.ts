@@ -104,6 +104,8 @@ const PAGE = `
   .dot { width:8px; height:8px; border-radius:999px; background:#30363d; display:inline-block; margin-right:6px; transition:background .4s, box-shadow .4s; }
   .dot.on { background:#3fb950; box-shadow:0 0 6px rgba(63,185,80,.5); }
   .dot.err { background:#d29922; box-shadow:0 0 6px rgba(210,153,34,.5); }
+  .mchip.m-bad { color:#f0883e; font-weight:600; cursor:help; }
+  .mchip.m-unk { color:#8b949e; border-bottom:1px dashed #3d444d; cursor:help; }
   .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 </style>
 </head>
@@ -200,7 +202,29 @@ const PAGE = `
     } else {
       feed.innerHTML = data.deals.map(render).join("");
     }
-    document.getElementById("stats").textContent = data.stats;
+    renderStats(data);
+  }
+  // Status chips: per-market liveness with an explanation on hover. Built with
+  // DOM APIs (no innerHTML) so marketplace-adjacent data never touches markup.
+  function renderStats(data) {
+    const el = document.getElementById("stats");
+    if (!el) return;
+    el.textContent = "";
+    el.appendChild(document.createTextNode((data.stats || "") + "  ·  "));
+    const mh = data.marketHealth || [];
+    mh.forEach((m, i) => {
+      if (i) el.appendChild(document.createTextNode(" · "));
+      const state = m.lastRoundOk === true ? "ok" : m.lastRoundOk === false ? "bad" : "unk";
+      const chip = document.createElement("span");
+      chip.className = "mchip m-" + state;
+      chip.textContent = m.market + (state === "ok" ? "✓" : state === "bad" ? "!" : "?") + " " + (m.rows24h || 0) + "/24h";
+      chip.title = state === "ok"
+        ? "Market healthy — last poll succeeded."
+        : state === "bad"
+          ? "Not answering — the last poll failed. Deal alerts for this market pause until it responds."
+          : "Not polled yet — status appears after the first poll round (about a minute).";
+      el.appendChild(chip);
+    });
   }
   const dot = document.getElementById("dot");
   const live = document.getElementById("live");
@@ -352,6 +376,8 @@ export function startDashboard(
     return {
       deals: deals.slice(0, 80).map(dealItem),
       stats: getStats(),
+      /** Per-market liveness for the status chips (see renderStats client-side). */
+      marketHealth: store.marketHealth(),
     };
   });
 

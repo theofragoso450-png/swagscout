@@ -15,7 +15,6 @@ import { GrailedAdapter } from "./markets/grailed.js";
 import { EbayAdapter } from "./markets/ebay.js";
 import { MercariAdapter } from "./markets/mercari.js";
 import { RakumaAdapter } from "./markets/rakuma.js";
-import type { MarketHealth } from "./types.js";
 
 /**
  * The composition: env → store → adapters → notifier → FX → catch-up →
@@ -185,15 +184,12 @@ export async function startApp(env: Env): Promise<App> {
   };
 }
 
-/** The dashboard's stats line for the header. */
+/** The dashboard's summary stats line. Per-market health is a separate wire
+ *  field (rendered as interactive chips client-side) — embedding the markers
+ *  here too made the header show markets twice. */
 function statsLine(store: Store, env: Env): string {
   const listings = store.recentListings(24 * 14);
   const deals = store.recentDeals(["all"], 1000);
-  // Busiest markets lead; zeros trail so a stalled market is still visible.
-  const health = [...store.marketHealth()].sort((a, b) => b.rows24h - a.rows24h);
-  const mark = (m: MarketHealth) => (m.lastRoundOk === true ? "✓" : m.lastRoundOk === false ? "!" : "?");
   const fmt = (n: number) => n.toLocaleString("en-US");
-  return `${fmt(listings.length)} listings · ${fmt(deals.length)} deals · last 14d · ${health
-    .map((m) => `${m.market}${mark(m)} ${fmt(m.rows24h)}/24h`)
-    .join(" · ")} · FX ${fxStatusLabel(env.fxRefreshHours)}`;
+  return `${fmt(listings.length)} listings · ${fmt(deals.length)} deals · last 14d · FX ${fxStatusLabel(env.fxRefreshHours)}`;
 }
