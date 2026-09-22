@@ -83,7 +83,7 @@ To keep it running after you close the terminal, run it inside [PM2](https://pm2
 | Bot replies but no alerts | Add the channel with `/watch brand:all`; check `DISCORD_ALLOWED_CHANNELS` contains that channel's ID |
 | Dashboard won't open | The server isn't running — check `docker compose logs -f` (Path A) or the terminal output (Path B) |
 | A market shows `!` | That market's site is failing or blocking; it will recover on its own — `?` just means never polled (e.g. eBay needs free API keys, see `.env.example`) |
-| Grailed shows ✓ but `0/24h` | Grailed blocks many datacenter/home IPs; it needs a residential proxy via `BROWSER_PROXY` in `.env` (see README) |
+| Grailed shows `!` (amber) and `0/24h` | Grailed is blocking this IP (Cloudflare); it needs a residential proxy via `BROWSER_PROXY` in `.env`, then verify with `npm run doctor:proxy` (see README) |
 | "node is not recognized" (Path B) | Node.js isn't installed or the terminal was open during install — install Node, then open a **new** terminal |
 
 ---

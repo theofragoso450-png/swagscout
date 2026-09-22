@@ -9,6 +9,34 @@ import type { Browser } from "playwright-core";
 let cached: Browser | null = null;
 let launching: Promise<Browser> | null = null;
 
+/**
+ * Parse BROWSER_PROXY into Playwright's launch shape. Residential proxies are
+ * almost always authenticated (user:pass), and Playwright wants credentials in
+ * dedicated username/password fields — a bare server URL with embedded
+ * credentials silently fails proxy auth. Returns undefined when unset/blank.
+ */
+export function parseProxyEnv(
+  raw: string | undefined,
+): { server: string; username?: string; password?: string } | undefined {
+  const v = raw?.trim();
+  if (!v) return undefined;
+  try {
+    const u = new URL(v);
+    if (!u.hostname) return { server: v };
+    const username = decodeURIComponent(u.username) || undefined;
+    const password = decodeURIComponent(u.password) || undefined;
+    return {
+      server: `${u.protocol}//${u.host}`,
+      ...(username && { username }),
+      ...(password && { password }),
+    };
+  } catch {
+    // Not a parseable URL — pass it through untouched and let the launcher
+    // surface the problem.
+    return { server: v };
+  }
+}
+
 export async function getSharedBrowser(executablePath?: string): Promise<Browser> {
   if (cached?.isConnected()) return cached;
   if (launching) return launching;
@@ -17,7 +45,9 @@ export async function getSharedBrowser(executablePath?: string): Promise<Browser
     const { chromium } = await import("playwright-core");
     // Optional escape hatch for IP-blocked targets (e.g. Grailed's Cloudflare):
     // BROWSER_PROXY=http://user:pass@proxy-host:port — ideally residential.
-    const proxyUrl = process.env.BROWSER_PROXY?.trim() || undefined;
+    // Credentials are split into Playwright's username/password fields (see
+    // parseProxyEnv) — embedded-in-server form silently fails auth.
+    const proxy = parseProxyEnv(process.env.BROWSER_PROXY);
     const attempts: Array<Record<string, unknown>> = [];
     if (executablePath) attempts.push({ executablePath });
     attempts.push({ channel: "chrome" }, { channel: "msedge" }, {});
@@ -27,7 +57,7 @@ export async function getSharedBrowser(executablePath?: string): Promise<Browser
         const browser = await chromium.launch({
           headless: true,
           args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-          ...(proxyUrl ? { proxy: { server: proxyUrl } } : {}),
+          ...(proxy ? { proxy } : {}),
           ...opts,
         });
         cached = browser;

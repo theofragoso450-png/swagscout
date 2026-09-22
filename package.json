@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke:drift": "tsx src/smoke-drift.ts",
-    "watch:fuzzy": "tsx src/watch-fuzzy.ts"
+    "watch:fuzzy": "tsx src/watch-fuzzy.ts",
+    "doctor:proxy": "tsx src/doctor-proxy.ts"
   },
   "dependencies": {
     "cheerio": "^1.0.0",
