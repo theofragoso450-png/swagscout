@@ -68,8 +68,14 @@ export class GrailedAdapter implements MarketAdapter {
       }
       return out;
     } catch (err) {
+      // Log and rethrow. Returning [] here once made a Cloudflare block
+      // indistinguishable from an empty result: market health recorded a
+      // successful round with 0 items ("✓ 0/24h"), and the poller marked the
+      // term a completed short page, recording false sold-or-gone absences at
+      // cycle wrap. A throw reaches the poller's catch, which stamps ok:false
+      // and drops the term's coverage flag.
       logger.warn({ err, market: this.id, query }, "grailed search failed");
-      return [];
+      throw err;
     }
   }
 }
