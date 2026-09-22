@@ -150,6 +150,14 @@ describe("market health", () => {
       const body = (await res.json()) as { marketHealth: Array<{ market: string; lastRoundOk: boolean | null }> };
       expect(body.marketHealth).toHaveLength(5);
       expect(body.marketHealth.find((m) => m.market === "rakuma")!.lastRoundOk).toBe(false);
+
+      // The deals feed carries the same health so the dashboard can render
+      // status chips without a second request.
+      const deals = await (await fetch(`http://127.0.0.1:${port}/api/deals`)).json();
+      expect(Array.isArray(deals.marketHealth)).toBe(true);
+      expect(deals.marketHealth.find((m) => m.market === "rakuma")).toEqual(
+        body.marketHealth.find((m) => m.market === "rakuma"),
+      );
     } finally {
       await dash.stop();
     }
