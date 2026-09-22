@@ -33,8 +33,11 @@ export class RakumaAdapter implements MarketAdapter {
       });
       return this.parse(html).slice(0, max);
     } catch (err) {
+      // Log and rethrow — see yahooAuctions.ts. A swallowed failure made a
+      // dead market read as a healthy empty one and poisoned sold-velocity
+      // coverage at cycle wrap.
       logger.warn({ err, market: this.id, query }, "rakuma search failed");
-      return [];
+      throw err;
     }
   }
 

@@ -100,8 +100,12 @@ export class EbayAdapter implements MarketAdapter {
       }
       return out;
     } catch (err) {
+      // Log and rethrow — see yahooAuctions.ts. A swallowed failure made a
+      // dead market read as a healthy empty one. (The not-configured case
+      // above still returns [] before this point: that is genuinely "no
+      // market", not a failure.)
       logger.warn({ err, market: this.id, query }, "ebay search failed");
-      return [];
+      throw err;
     }
   }
 }
