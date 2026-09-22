@@ -70,7 +70,7 @@ All via environment variables — see `.env.example`. Highlights:
 - `COMP_ROUND_USD` — price-band rounding for comp grouping (default 50)
 - `RATE_LIMIT_RPM` — per-host politeness cap (default 12)
 - `DISCORD_ALLOWED_CHANNELS` — channel allow-list for the bot
-- `BROWSER_PROXY` — optional proxy for browser-based markets (see Grailed note above)
+- `BROWSER_PROXY` — optional proxy for browser-based markets (see Grailed note above). Include credentials in the URL (`http://user:pass@host:port`); they are applied to the browser's proxy auth automatically. Run `npm run doctor:proxy` after wiring it: it prints direct vs proxied egress IPs, verifies a real Chromium session through the proxy, and fires one live Grailed probe.
 
 Brand catalog (38 brands with English + Japanese aliases — CDG, Number (N)ine, Yohji, Issey, Raf, Undercover, Nigo-era BAPE, Evisu, early-2000s Supreme, and more) lives in `src/config/brands.ts`; default thresholds in `src/config/rules.ts`. Edit those files to tune the watchlist — the /brands command lists every key.
 
