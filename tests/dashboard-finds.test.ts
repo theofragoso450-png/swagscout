@@ -74,4 +74,26 @@ describe("/api/finds", () => {
     const json = (await res.json()) as { finds: unknown[] };
     expect(json.finds).toEqual([]);
   });
+
+  it("flags fast movers when the brand's gone-now share clears the bar", async () => {
+    // raf brand: two gone-now of four stored rows → share 0.5 = FAST_MOVER_SHARE.
+    // Fillers must not join v3/v4's comp pool: disjoint titles fail the token
+    // overlap, so the finds' comp discounts stay untouched.
+    const filler = (id: string) => {
+      const l = listing(id);
+      l.title = `totally unrelated object ${id}`;
+      store.upsertListing(l);
+    };
+    filler("v1");
+    filler("v2");
+    store.applyAbsences("yahoo", new Date().toISOString(), ["yahoo:v1", "yahoo:v2"]);
+    seed("v3", [{ kind: "comp", detail: "50% below 20-listing median ($400)" }]);
+    seed("v4", [{ kind: "comp", detail: "50% below 20-listing median ($400)" }]);
+    const port = await boot();
+    const res = await fetch(`http://127.0.0.1:${port}/api/finds`);
+    const json = (await res.json()) as { finds: Array<{ title: string; fast: boolean }> };
+    const byTitle = new Map(json.finds.map((f) => [f.title, f.fast]));
+    expect(byTitle.get("test item v3")).toBe(true);
+    expect(byTitle.get("test item v4")).toBe(true);
+  });
 });

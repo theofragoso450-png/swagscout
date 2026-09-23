@@ -702,6 +702,50 @@ export class Store {
     this.clearAllMissingStmt.run();
   }
 
+  /**
+   * Gone-now share per brand over that brand's stored listings — the
+   * sell-through aggregate the finds factor consumes (and the shape ROADMAP
+   * unit 4's /velocity command will reuse). Every stored row counts toward
+   * its brand's denominator: a stock wiped out early keeps its high
+   * gone-share even after the shelf empties.
+   *
+   * A brand with no fresh ingest inside `freshCutoffHours` is dropped
+   * entirely — a paused or blocked market must not read as stellar
+   * sell-through. Unbranded rows never pollute the aggregate.
+   */
+  sellThroughByBrand(
+    freshCutoffHours = 24,
+    now: number = Date.now(),
+  ): Map<string, { gone: number; total: number; share: number }> {
+    const freshCutoff = new Date(now - freshCutoffHours * 3_600_000).toISOString();
+    const rows = this.db
+      .prepare(
+        `SELECT brandKey AS brand,
+                COUNT(*) AS total,
+                SUM(CASE WHEN missingSince IS NOT NULL THEN 1 ELSE 0 END) AS gone
+         FROM listings
+         WHERE brandKey IS NOT NULL
+         GROUP BY brandKey`,
+      )
+      .all() as Array<{ brand: string; total: number; gone: number }>;
+    const fresh = new Set(
+      (
+        this.db
+          .prepare(
+            `SELECT DISTINCT brandKey AS brand FROM listings
+             WHERE brandKey IS NOT NULL AND updatedAt >= ?`,
+          )
+          .all(freshCutoff) as Array<{ brand: string }>
+      ).map((r) => r.brand),
+    );
+    const out = new Map<string, { gone: number; total: number; share: number }>();
+    for (const r of rows) {
+      if (!fresh.has(r.brand)) continue;
+      out.set(r.brand, { gone: r.gone, total: r.total, share: r.gone / r.total });
+    }
+    return out;
+  }
+
   // ── market health ────────────────────────────────────────────────────────
 
   /**

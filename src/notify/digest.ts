@@ -65,11 +65,12 @@ export async function digestTick(
   }
 
   const pool = findsPool(now);
-  const finds = rankFinds(store.recentDeals(["all"], pool.limit, { since: pool.since }), 24, now);
+  const velocity = store.sellThroughByBrand(24, now);
+  const finds = rankFinds(store.recentDeals(["all"], pool.limit, { since: pool.since }), 24, now, 10, { velocity });
   const channels = [...new Set(store.listSubscriptions().map((s) => s.channelId))];
   let sentTo: string[] = [];
   if (finds.length > 0 && channels.length > 0) {
-    sentTo = await send(buildFindEmbeds(finds), channels);
+    sentTo = await send(buildFindEmbeds(finds, velocity), channels);
     if (sentTo.length === 0) return { triggered: false, sentTo: [], findCount: finds.length };
   }
   store.setMeta(sentKey, String(slot.instant));

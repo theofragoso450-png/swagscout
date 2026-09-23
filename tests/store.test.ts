@@ -25,6 +25,33 @@ function listing(id: string, price: number, brandKey?: string) {
 }
 
 describe("Store", () => {
+  it("sellThroughByBrand: gone-now share per brand, honest on stale and missing data", () => {
+    const store = new Store(dbPath);
+    const seed = (id: string, brand: string, missing: boolean) => {
+      store.upsertListing(listing(id, 1000, brand));
+      if (missing) store.applyAbsences("yahoo", new Date().toISOString(), [`yahoo:${id}`]);
+    };
+    // yohji: 3 gone of 4 → 0.75; cdg: 0 of 2 → 0; raf: unbranded rows only.
+    seed("y1", "yohji", true);
+    seed("y2", "yohji", true);
+    seed("y3", "yohji", true);
+    seed("y4", "yohji", false);
+    seed("c1", "cdg", false);
+    seed("c2", "cdg", false);
+    seed("u1");
+    seed("u2");
+    const v = store.sellThroughByBrand(24);
+    expect(v.get("yohji")).toEqual({ gone: 3, total: 4, share: 0.75 });
+    expect(v.get("cdg")).toEqual({ gone: 0, total: 2, share: 0 });
+    expect(v.has("raf")).toBe(false); // unbranded rows never pollute the map
+
+    // A brand with no fresh ingest inside the cutoff is dropped entirely:
+    // a paused or blocked market must not read as stellar sell-through.
+    const old = store.sellThroughByBrand(0);
+    expect(old.has("yohji")).toBe(false);
+    expect(old.has("cdg")).toBe(false);
+  });
+
   it("roundtrips listings and detects unseen ids", () => {
     const store = new Store(dbPath);
     const l = listing("n1", 1000, "raf");

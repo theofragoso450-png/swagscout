@@ -50,6 +50,9 @@ const ALLOWED_PREFIXES = [
   // titleLang: a static-markup ternary (` lang="ja"` / absent) whose embedded
   // value token is escapeHtml(d.titleLang) and is verified by the nested pass
   "d.titleLang ?",
+  // fast: a server-computed boolean (brand gone-now share ≥ FAST_MOVER_SHARE)
+  // gating purely static badge markup — no interpolated value inside.
+  "d.fast ?",
 ];
 
 export function isUnsafe(token: string): boolean {

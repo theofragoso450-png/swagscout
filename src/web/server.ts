@@ -8,7 +8,7 @@ import { fetchThumb, isAllowedImageUrl } from "./thumbs.js";
 import { extractCondition } from "../core/normalize.js";
 import { formatReason } from "../core/reasons.js";
 import { formatUsd } from "../core/money.js";
-import { rankFinds, findsPool } from "../notify/finds.js";
+import { rankFinds, findsPool, FAST_MOVER_SHARE } from "../notify/finds.js";
 
 const CONDITION_LABEL: Record<string, string> = {
   new: "New",
@@ -96,6 +96,7 @@ const PAGE = `
   .finds-head { font-size:16px; font-weight:700; margin:22px 0 10px; letter-spacing:.2px; display:flex; align-items:center; gap:10px; }
   .finds-head::before { content:""; width:8px; height:8px; border-radius:999px; background:#3fb950; box-shadow:0 0 8px rgba(63,185,80,.4); }
   .tier { border-radius:999px; padding:1px 8px; font-size:11px; font-weight:700; margin-right:8px; }
+  .fast { border-radius:999px; padding:1px 8px; font-size:11px; font-weight:600; margin-right:8px; background:rgba(46,204,113,.12); color:#2ecc71; }
   .tier-S { background:#1f6feb; color:#ffffff; }
   .tier-A { background:#238636; color:#ffffff; }
   .tier-B { background:#9e6a03; color:#ffffff; }
@@ -258,7 +259,7 @@ const PAGE = `
     return \`<div class="deal">
       \${d.imageUrl ? \`<img src="\${escapeHtml(safeUrl(d.imageUrl))}" alt="" loading="lazy" onerror="this.classList.add('imgph');this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img class='img imgph' src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' alt=''>"}
       <div class="meta">
-        <div class="title">\${d.rank != null ? \`<span class="tier tier-\${escapeHtml(d.tier)}">\${escapeHtml(d.findLabel)}</span>\` : ""}<a href="\${escapeHtml(safeUrl(d.url))}" target="_blank"\${d.titleLang ? \` lang="\${escapeHtml(d.titleLang)}"\` : ""}>\${escapeHtml(d.title)}</a></div>
+        <div class="title">\${d.rank != null ? \`<span class="tier tier-\${escapeHtml(d.tier)}">\${escapeHtml(d.findLabel)}</span>\${d.fast ? '<span class="fast" title="Pieces from this brand tend to stop being listed soon (gone-now share of its current stock). Absence is not proof of sale.">⚡ fast mover</span>' : ""}\` : ""}<a href="\${escapeHtml(safeUrl(d.url))}" target="_blank"\${d.titleLang ? \` lang="\${escapeHtml(d.titleLang)}"\` : ""}>\${escapeHtml(d.title)}</a></div>
         <div class="row">
           <span class="badge">\${escapeHtml(d.marketLabel)}</span>
           \${d.size ? \`<span class="badge size">\${escapeHtml(d.size)}</span>\` : ""}
@@ -384,12 +385,14 @@ export function startDashboard(
   /** Top finds of the day — same rankFinds ranking the /finds command uses. */
   app.get("/api/finds", async () => {
     const pool = findsPool(Date.now());
+    const velocity = store.sellThroughByBrand(24);
     return {
-      finds: rankFinds(store.recentDeals(["all"], pool.limit, { since: pool.since }), 24).map((f) => ({
+      finds: rankFinds(store.recentDeals(["all"], pool.limit, { since: pool.since }), 24, Date.now(), 10, { velocity }).map((f) => ({
         ...dealItem(f.deal),
         rank: f.rank,
         tier: f.rarity,
         findLabel: `#${f.rank} ${f.rarity}-tier · ${f.findsScore} pts`,
+        fast: f.deal.listing.brandKey ? (velocity.get(f.deal.listing.brandKey)?.share ?? 0) >= FAST_MOVER_SHARE : false,
       })),
     };
   });
