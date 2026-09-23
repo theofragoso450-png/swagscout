@@ -53,6 +53,36 @@ export interface StoredListing {
   fxRate: number | null;
 }
 
+/**
+ * Gone-within-48h churn for one brand's last-N sightings. Honest by
+ * construction: "gone" is absence from complete poll rounds, never proof of
+ * sale.
+ */
+export interface VelocityStat {
+  /** Sightings considered (≤ n; fewer when the brand has less history). */
+  observed: number;
+  /** Of those, how many are currently absent. */
+  gone: number;
+  /** Of those, how many vanished ≤48h after being found. */
+  goneWithin48h: number;
+  /** goneWithin48h / observed (0 when nothing observed). */
+  rate: number;
+}
+
+const GONE_WITHIN_MS = 48 * 3_600_000;
+
+function velocityStat(rows: Array<{ foundAt: string; missingSince: string | null }>): VelocityStat {
+  let gone = 0;
+  let within = 0;
+  for (const r of rows) {
+    if (r.missingSince === null) continue;
+    gone++;
+    const t = Date.parse(r.missingSince) - Date.parse(r.foundAt);
+    if (Number.isFinite(t) && t >= 0 && t <= GONE_WITHIN_MS) within++;
+  }
+  return { observed: rows.length, gone, goneWithin48h: within, rate: rows.length ? within / rows.length : 0 };
+}
+
 /** One observation in a listing's append-only price history. */
 export interface PriceEvent {
   /** ISO instant of the observation. */
@@ -117,6 +147,8 @@ export class Store {
   private priceEventsForStmt: StatementSync;
   private currentPriceStmt: StatementSync;
   private deletePriceEventsForStmt: StatementSync;
+  private brandVelocityStmt: StatementSync;
+  private brandVelocityAllStmt: StatementSync;
 
   constructor(dbPath: string) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -281,6 +313,18 @@ export class Store {
     this.deletePriceEventsForStmt = this.db.prepare(
       "DELETE FROM price_events WHERE listingKey = ?",
     );
+    this.brandVelocityStmt = this.db.prepare(
+      `SELECT foundAt, missingSince FROM listings
+       WHERE brandKey = ? ORDER BY foundAt DESC, rowid DESC LIMIT ?`,
+    );
+    // Per-brand last-N observations in one pass (window function, SQLite ≥3.25).
+    this.brandVelocityAllStmt = this.db.prepare(
+      `SELECT brandKey, foundAt, missingSince FROM (
+         SELECT brandKey, foundAt, missingSince,
+                ROW_NUMBER() OVER (PARTITION BY brandKey ORDER BY foundAt DESC, rowid DESC) AS rn
+         FROM listings WHERE brandKey IS NOT NULL
+       ) WHERE rn <= ?`,
+    );
     this.countMissingStmt = this.db.prepare(
       "SELECT COUNT(*) AS c FROM listings WHERE missingSince IS NOT NULL",
     );
@@ -420,6 +464,38 @@ export class Store {
   /** Append-only price history for one listing, oldest first. */
   priceEvents(listingKey: string): PriceEvent[] {
     return this.priceEventsForStmt.all(listingKey) as unknown as PriceEvent[];
+  }
+
+  /**
+   * Gone-within-48h rate over a brand's last `n` sightings — the /velocity
+   * metric. An observation "vanished within 48h" when it is currently absent
+   * (missingSince set) and the absence began ≤48h after it was found. This is
+   * brand-level churn: it never claims an individual piece sold.
+   */
+  brandVelocity(brandKey: string, n = 20): VelocityStat {
+    const rows = this.brandVelocityStmt.all(brandKey, n) as unknown as Array<{
+      foundAt: string;
+      missingSince: string | null;
+    }>;
+    return velocityStat(rows);
+  }
+
+  /** Same stat for every brand with stored listings, in one query. */
+  brandVelocityAll(n = 20): Map<string, VelocityStat> {
+    const rows = this.brandVelocityAllStmt.all(n) as unknown as Array<{
+      brandKey: string;
+      foundAt: string;
+      missingSince: string | null;
+    }>;
+    const byBrand = new Map<string, Array<{ foundAt: string; missingSince: string | null }>>();
+    for (const r of rows) {
+      const list = byBrand.get(r.brandKey);
+      if (list) list.push({ foundAt: r.foundAt, missingSince: r.missingSince });
+      else byBrand.set(r.brandKey, [{ foundAt: r.foundAt, missingSince: r.missingSince }]);
+    }
+    const out = new Map<string, VelocityStat>();
+    for (const [brand, list] of byBrand) out.set(brand, velocityStat(list));
+    return out;
   }
 
   recentListings(hours: number): StoredListing[] {
