@@ -53,6 +53,17 @@ export interface StoredListing {
   fxRate: number | null;
 }
 
+/** One observation in a listing's append-only price history. */
+export interface PriceEvent {
+  /** ISO instant of the observation. */
+  at: string;
+  /** Native price at that instant. */
+  price: number;
+  currency: string;
+  /** USD value at the rate in force when the event was written. */
+  priceUsd: number;
+}
+
 export interface Subscription {
   guildId: string;
   channelId: string;
@@ -102,6 +113,10 @@ export class Store {
   private clearMissingForStmt: StatementSync;
   private clearAllMissingStmt: StatementSync;
   private countMissingStmt: StatementSync;
+  private insertPriceEventStmt: StatementSync;
+  private priceEventsForStmt: StatementSync;
+  private currentPriceStmt: StatementSync;
+  private deletePriceEventsForStmt: StatementSync;
 
   constructor(dbPath: string) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -144,6 +159,22 @@ export class Store {
     if (!cols.some((c) => c.name === "fxRate")) {
       this.db.exec("ALTER TABLE listings ADD COLUMN fxRate REAL");
     }
+    // Price-event ledger: append-only history of listing prices. Written by
+    // upsertListing on first sight and on every native-price move; an FX-rate
+    // move alone never writes (the ledger tracks the market's price, not our
+    // conversion table). Additive — nothing pre-existing reads it, so no
+    // PIPELINE_VERSION bump.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS price_events (
+        listingKey TEXT NOT NULL,
+        at TEXT NOT NULL,
+        price REAL NOT NULL,
+        currency TEXT NOT NULL,
+        priceUsd REAL NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_price_events_listing
+        ON price_events (listingKey, at);
+    `);
 
     this.hasStmt = this.db.prepare(
       "SELECT 1 AS one FROM listings WHERE market = ? AND marketId = ? LIMIT 1",
@@ -237,6 +268,19 @@ export class Store {
       "UPDATE listings SET missingSince = NULL WHERE key = ?",
     );
     this.clearAllMissingStmt = this.db.prepare("UPDATE listings SET missingSince = NULL");
+    this.insertPriceEventStmt = this.db.prepare(
+      "INSERT INTO price_events (listingKey, at, price, currency, priceUsd) VALUES (?, ?, ?, ?, ?)",
+    );
+    // rowid breaks same-millisecond ties (batched seeds share `at`).
+    this.priceEventsForStmt = this.db.prepare(
+      "SELECT at, price, currency, priceUsd FROM price_events WHERE listingKey = ? ORDER BY at, rowid",
+    );
+    this.currentPriceStmt = this.db.prepare(
+      "SELECT price, currency FROM listings WHERE key = ?",
+    );
+    this.deletePriceEventsForStmt = this.db.prepare(
+      "DELETE FROM price_events WHERE listingKey = ?",
+    );
     this.countMissingStmt = this.db.prepare(
       "SELECT COUNT(*) AS c FROM listings WHERE missingSince IS NOT NULL",
     );
@@ -336,9 +380,14 @@ export class Store {
 
   upsertListing(l: Listing): void {
     const now = new Date().toISOString();
+    const key = `${l.market}:${l.id}`;
     const rates = fxRatesSnapshot();
+    // Prior native price, read BEFORE the upsert overwrites it.
+    const prior = this.currentPriceStmt.get(key) as
+      | { price: number; currency: string }
+      | undefined;
     this.upsertListingStmt.run({
-      key: `${l.market}:${l.id}`,
+      key,
       market: l.market,
       marketId: l.id,
       title: l.title,
@@ -359,6 +408,18 @@ export class Store {
       // records 0.01 and makes the row's vintage unauditable.
       fxRate: usdFrom(1, l.currency, rates),
     });
+    // Price-event ledger: a baseline event on first sight, then one per
+    // native-price move. Pure FX moves never write (priceUsd recomputes
+    // silently), so the ledger stays a market-price history:
+    // two drops ⇒ exactly three events.
+    if (!prior || prior.price !== l.price || prior.currency !== l.currency) {
+      this.insertPriceEventStmt.run(key, now, l.price, l.currency, l.priceUsd);
+    }
+  }
+
+  /** Append-only price history for one listing, oldest first. */
+  priceEvents(listingKey: string): PriceEvent[] {
+    return this.priceEventsForStmt.all(listingKey) as unknown as PriceEvent[];
   }
 
   recentListings(hours: number): StoredListing[] {
@@ -628,6 +689,11 @@ export class Store {
         `DELETE FROM deals WHERE listingKey IN (${oldListings.map(() => "?").join(",")})`,
       );
       const dChanges = Number(deleteDealsIn.run(...oldListings.map((r) => r.key)).changes);
+      // The price ledger dies with its listing — no orphaned history.
+      const deleteEventsIn = this.db.prepare(
+        `DELETE FROM price_events WHERE listingKey IN (${oldListings.map(() => "?").join(",")})`,
+      );
+      deleteEventsIn.run(...oldListings.map((r) => r.key));
       this.deleteOldListingsStmt.run(cutoff);
       const oChanges = Number(
         this.deleteOrphanDealsStmt.run().changes, // sweep deals orphaned by earlier prunes
