@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { evaluateThreshold, THRESHOLD_RULES } from "../src/config/rules.js";
-import { scoreDeal } from "../src/core/score.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { Store } from "../src/core/store.js";
+import { evaluateThreshold, THRESHOLD_RULES, RULES_BY_BRAND } from "../src/config/rules.js";
+import { scoreDeal, evaluateDeal } from "../src/core/score.js";
+import { extractCondition } from "../src/core/normalize.js";
 import { proxyLinks } from "../src/proxy/links.js";
 import { buildDealEmbed } from "../src/notify/embeds.js";
 import { normalizeListing } from "../src/core/normalize.js";
@@ -84,6 +89,95 @@ describe("evaluateThreshold", () => {
   it("ignores brands without rules", () => {
     expect(evaluateThreshold({ brandKey: "guidi", title: "guidi boots", priceUsd: 100 })).toBeDefined();
     expect(evaluateThreshold({ brandKey: "nope", title: "nope thing", priceUsd: 10 })).toBeUndefined();
+  });
+});
+
+describe("evaluateThreshold — condition-aware caps (v0.5.0 unit 5)", () => {
+  // The live yohji rule: maxUsd 350, no conditionCaps (default policy).
+  it("fires clean-condition listings exactly as before", () => {
+    expect(
+      evaluateThreshold({ brandKey: "yohji", title: "ヨウジヤマモト シャツ", priceUsd: 300, condition: "like-new" }),
+    ).toBeDefined();
+    // No label at all — never hit a cap it never asked for.
+    expect(evaluateThreshold({ brandKey: "yohji", title: "ヨウジヤマモト シャツ", priceUsd: 300 })).toBeDefined();
+  });
+
+  it("does not fire a junk-grade listing above the default degraded cap", () => {
+    // $300 > 350/2 — a junk grade is not a deal at a clean listing's price.
+    expect(
+      evaluateThreshold({ brandKey: "yohji", title: "ヨウジヤマモト シャツ", priceUsd: 300, condition: "junk" }),
+    ).toBeUndefined();
+    // But below half-cap it fires.
+    const d = evaluateThreshold({ brandKey: "yohji", title: "ヨウジヤマモト シャツ", priceUsd: 150, condition: "junk" });
+    expect(d?.maxUsd).toBe(175);
+  });
+
+  it("used keeps the full cap — only junk carries the deeper-discount factor", () => {
+    expect(evaluateThreshold({ brandKey: "yohji", title: "yohji shirt", priceUsd: 300, condition: "used" })?.maxUsd).toBe(350);
+  });
+
+  it("every shipped rule opts into the junk factor", () => {
+    for (const r of THRESHOLD_RULES) {
+      expect(r.junkFactor ?? 1, `${r.brandKey}`).toBe(0.5);
+      expect(r.junkFactor!, `${r.brandKey} factor in (0,1]`).toBeGreaterThan(0);
+      expect(r.junkFactor!, `${r.brandKey} factor in (0,1]`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("a rule with conditionCaps sets its own bar (matrix per the roadmap)", () => {
+    const rule = RULES_BY_BRAND.get("yohji")!;
+    const saved = rule.conditionCaps;
+    try {
+      rule.conditionCaps = { junk: false, used: 100 };
+      // junk: disabled entirely — no price clears it.
+      expect(evaluateThreshold({ brandKey: "yohji", title: "yohji shirt", priceUsd: 10, condition: "junk" })).toBeUndefined();
+      // used: fires only below its explicit cap.
+      expect(evaluateThreshold({ brandKey: "yohji", title: "yohji shirt", priceUsd: 150, condition: "used" })).toBeUndefined();
+      expect(evaluateThreshold({ brandKey: "yohji", title: "yohji shirt", priceUsd: 90, condition: "used" })?.maxUsd).toBe(100);
+      // clean conditions keep the full cap.
+      expect(evaluateThreshold({ brandKey: "yohji", title: "yohji shirt", priceUsd: 300, condition: "new" })).toBeDefined();
+    } finally {
+      rule.conditionCaps = saved;
+    }
+  });
+
+  it("capless-and-factorless rules behave exactly as today (the opt-in contract)", () => {
+    const rule = RULES_BY_BRAND.get("cdg")!;
+    expect(rule.conditionCaps).toBeUndefined();
+    const saved = rule.junkFactor;
+    try {
+      delete rule.junkFactor; // a rule that never opted in
+      // Junk on the FULL cap, identical to pre-unit-5 behavior.
+      expect(evaluateThreshold({ brandKey: "cdg", title: "cdg tee", priceUsd: 100, condition: "junk" })?.maxUsd).toBe(120);
+      expect(evaluateThreshold({ brandKey: "cdg", title: "cdg tee", priceUsd: 100, condition: "used" })).toBeDefined();
+    } finally {
+      rule.junkFactor = saved;
+    }
+  });
+
+  it("condition parses from the title through the real path (evaluateDeal)", () => {
+    const store = new Store(mkdtempSync(path.join(tmpdir(), "swagscout-cond-")) + "\\test.db");
+    try {
+      const junk = normalizeListing({
+        market: "yahoo",
+        id: "j1",
+        title: "ヨウジヤマモト シャツ ジャンク",
+        price: 48000,
+        currency: "JPY",
+        url: "https://auctions.yahoo.co.jp/jp/auction/j1",
+      });
+      junk.brandKey = "yohji";
+      expect(extractCondition(junk.title)).toBe("junk");
+      // ~$310: under the full cap, over the junk factor cap (175) → no deal.
+      expect(evaluateDeal(junk, { store, compRoundUsd: 50 })).toBeUndefined();
+      // Same price, clean title → threshold deal as always.
+      const clean = { ...junk, id: "j2", title: "ヨウジヤマモト シャツ" };
+      const deal = evaluateDeal(clean, { store, compRoundUsd: 50 });
+      expect(deal?.reasons.some((r) => r.kind === "threshold")).toBe(true);
+    } finally {
+      store.close();
+      rmSync(path.join(tmpdir(), "swagscout-cond-"), { recursive: true, force: true });
+    }
   });
 });
 

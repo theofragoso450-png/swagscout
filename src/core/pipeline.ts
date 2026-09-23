@@ -31,5 +31,9 @@
  *       under, so an FX move cannot push the "from" number past the "to" one.
  *   6 — 5 also covers drops whose from-price survives only inside an older
  *       prose line, not just `wasUsd`.
+ *   7 — condition-aware threshold rules: degraded conditions (used/junk)
+ *       default to half the brand cap unless a rule sets conditionCaps, and
+ *       the condition extractor now recognizes junk/damaged grades. Rules
+ *       without caps and unlabeled titles behave exactly as before.
  */
-export const PIPELINE_VERSION = 6;
+export const PIPELINE_VERSION = 7;
