@@ -76,6 +76,8 @@ describe("dashboard accessibility contract", () => {
   it("gives card, proxy and action links a visible focus treatment", async () => {
     const html = await page(await boot());
     expect(html).toContain(".title a:focus-visible");
+    // Fast-mover badge ships with its honest explanation on hover.
+    expect(html).toContain('class="fast" title="Pieces from this brand tend to stop being listed soon');
     expect(html).toContain(".proxies a:focus-visible");
     expect(html).toContain(".link:focus-visible");
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findsScore, classifyRarity, rankFinds } from "../src/notify/finds.js";
+import { findsScore, classifyRarity, rankFinds, FAST_MOVER_SHARE } from "../src/notify/finds.js";
 import { compFacts } from "../src/core/reasons.js";
 import type { Deal } from "../src/types.js";
 
@@ -134,6 +134,73 @@ describe("rankFinds", () => {
       new Date(NOW - 6 * 3_600_000).toISOString(),
       new Date(NOW - 2 * 3_600_000).toISOString(),
     ]);
+  });
+
+  it("velocity reorders finds with unchanged comp data — the exit-gate test", () => {
+    const deepSlow = compDeal({ discount: 45, sample: 20, median: 400 }); // 49 pts
+    deepSlow.listing.id = "yahoo:slow";
+    deepSlow.listing.brandKey = "cdg"; // slow brand: no velocity entry
+    const shallowerFast = compDeal({ discount: 40, sample: 20, median: 400 }); // 46 pts
+    shallowerFast.listing.id = "yahoo:fast"; // brandKey yohji
+    const noVelocity = rankFinds([deepSlow, shallowerFast], 24, NOW);
+    expect(noVelocity.map((f) => f.deal.listing.id)).toEqual(["yahoo:slow", "yahoo:fast"]);
+
+    // Same deals, same comps: the fast-moving brand jumps the slower one.
+    const withVelocity = rankFinds([deepSlow, shallowerFast], 24, NOW, 10, {
+      velocity: new Map([["yohji", { share: 0.8 }]]),
+    });
+    expect(withVelocity.map((f) => f.deal.listing.id)).toEqual(["yahoo:fast", "yahoo:slow"]);
+    expect(withVelocity[0].findsScore).toBe(46 + 6); // 0.8² × 10 = 6.4 → 6
+    expect(withVelocity[1].findsScore).toBe(49); // slow brand: no velocity entry
+  });
+
+  it("reorders between brands, and never claims an individual piece sold", () => {
+    const a = compDeal({ discount: 30, sample: 12, median: 300 }); // 37 pts
+    a.listing.id = "yahoo:a";
+    const b = compDeal({ discount: 30, sample: 12, median: 300 }); // 37 pts
+    b.listing.id = "yahoo:b";
+    b.listing.brandKey = "cdg"; // slow brand
+    const finds = rankFinds([a, b], 24, NOW, 10, {
+      velocity: new Map([
+        ["yohji", { share: 0.9 }],
+        ["cdg", { share: 0.2 }],
+      ]),
+    });
+    // Identical comps — only the brand-level churn separates them.
+    expect(finds.map((f) => f.deal.listing.id)).toEqual(["yahoo:a", "yahoo:b"]);
+    expect(finds[0].findsScore).toBe(37 + 8); // 0.9² × 10 = 8.1 → 8
+    expect(finds[1].findsScore).toBe(37 + 0); // 0.2² × 10 = 0.4 → 0
+    // The factor is derived from brand churn, not the listing's own absence.
+    expect(a.listing.missingSince).toBeUndefined();
+  });
+
+  it("is stable across an FX rate move — velocity sees no currency data", () => {
+    const deal = compDeal({ discount: 40, sample: 20, median: 400 });
+    const velocity = new Map([["yohji", { share: 0.75 }]]);
+    const before = findsScore(deal, { velocity });
+    (deal.listing as { priceUsd: number }).priceUsd = deal.listing.priceUsd * 0.8;
+    (deal.listing as { price: number }).price = deal.listing.price * 0.8;
+    const after = findsScore(deal, { velocity });
+    expect(after).toBe(before); // price moved, compFacts re-derives → same discount
+  });
+
+  it("awards zero velocity to unknown, unbranded, and unlabelled deals", () => {
+    const unbranded = compDeal({ discount: 40, sample: 20, median: 400 });
+    delete (unbranded.listing as { brandKey?: string }).brandKey;
+    const unknownBrand = compDeal({ discount: 40, sample: 20, median: 400 });
+    unknownBrand.listing.brandKey = "mcgregor";
+    const noCtx = compDeal({ discount: 40, sample: 20, median: 400 });
+    expect(findsScore(unbranded, { velocity: new Map([["yohji", { share: 1 }]]) })).toBe(
+      findsScore(noCtx),
+    );
+    expect(findsScore(unknownBrand, { velocity: new Map([["yohji", { share: 1 }]]) })).toBe(
+      findsScore(noCtx),
+    );
+    expect(findsScore(noCtx)).toBe(findsScore(noCtx));
+  });
+
+  it("FAST_MOVER_SHARE gates the ⚡ label at a high bar", () => {
+    expect(FAST_MOVER_SHARE).toBeGreaterThanOrEqual(0.5);
   });
 
   it("caps the list at 10 by default", () => {

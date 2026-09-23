@@ -247,7 +247,8 @@ export class DiscordNotifier {
   private async cmdFinds(i: ChatInputCommandInteraction): Promise<void> {
     const hours = Math.min(Math.max(i.options.getInteger("hours") ?? 24, 1), 168);
     const pool = findsPool(Date.now(), hours);
-    const finds = rankFinds(this.store.recentDeals(["all"], pool.limit, { since: pool.since }), hours);
+    const velocity = this.store.sellThroughByBrand(24);
+    const finds = rankFinds(this.store.recentDeals(["all"], pool.limit, { since: pool.since }), hours, Date.now(), 10, { velocity });
     if (finds.length === 0) {
       await i.reply({
         content:
@@ -257,7 +258,7 @@ export class DiscordNotifier {
       });
       return;
     }
-    const embeds = buildFindEmbeds(finds);
+    const embeds = buildFindEmbeds(finds, velocity);
     await i.reply({ embeds, ephemeral: true });
   }
 

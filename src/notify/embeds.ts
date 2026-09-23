@@ -4,7 +4,8 @@ import { getBrand } from "../config/brands.js";
 import { safeUrl } from "../core/safe-url.js";
 import { formatReason } from "../core/reasons.js";
 import { formatUsd } from "../core/money.js";
-import type { FindRank } from "./finds.js";
+import type { FindRank, VelocityMap } from "./finds.js";
+import { FAST_MOVER_SHARE } from "./finds.js";
 
 /** APIEmbed-compatible subset we build manually (no discord.js dependency here). */
 export interface EmbedPayload {
@@ -108,14 +109,22 @@ export function buildDealEmbeds(deals: Deal[]): EmbedPayload[] {
 }
 
 /** Deal embed decorated with the find's rank, rarity tier, and finds score. */
-export function buildFindEmbeds(finds: FindRank[]): EmbedPayload[] {
+export function buildFindEmbeds(
+  finds: FindRank[],
+  velocity?: VelocityMap,
+): EmbedPayload[] {
   return finds.map((f) => {
     const base = buildDealEmbed(f.deal);
+    const brand = f.deal.listing.brandKey;
+    const share = brand ? (velocity?.get(brand)?.share ?? 0) : 0;
     return {
       ...base,
       fields: [
         { name: "Find", value: `#${f.rank} · ${f.rarity}-tier`, inline: true },
         { name: "Finds score", value: String(f.findsScore), inline: true },
+        ...(share >= FAST_MOVER_SHARE
+          ? [{ name: "Velocity", value: "⚡ Fast mover — pieces like this stop being listed soon", inline: false }]
+          : []),
         ...base.fields,
       ],
     };
