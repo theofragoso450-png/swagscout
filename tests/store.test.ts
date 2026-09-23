@@ -25,6 +25,49 @@ function listing(id: string, price: number, brandKey?: string) {
 }
 
 describe("Store", () => {
+  it("price-event ledger: baseline on first sight, one per move, none on unchanged or pure FX", () => {
+    const store = new Store(dbPath);
+    const l = listing("p1", 1000, "raf");
+    store.upsertListing(l);
+    expect(store.priceEvents("yahoo:p1")).toHaveLength(1); // baseline
+
+    // Unchanged price, fresh timestamps: no event.
+    store.upsertListing(l);
+    expect(store.priceEvents("yahoo:p1")).toHaveLength(1);
+
+    // First drop: one new event.
+    store.upsertListing({ ...l, price: 800 });
+    expect(store.priceEvents("yahoo:p1")).toHaveLength(2);
+
+    // A pure FX move rewrites priceUsd but must NOT write an event.
+    const before = store.priceEvents("yahoo:p1").length;
+    const moved = store.get("yahoo", "p1")!;
+    expect(moved.priceUsd).not.toBe(0);
+    store.upsertListing({ ...l, price: 800, priceUsd: 4 });
+    expect(store.priceEvents("yahoo:p1")).toHaveLength(before); // unchanged count
+
+    // Second drop: roadmap arithmetic — two drops ⇒ exactly three events.
+    store.upsertListing({ ...l, price: 600 });
+    const events = store.priceEvents("yahoo:p1");
+    expect(events).toHaveLength(3);
+    expect(events.map((e) => e.price)).toEqual([1000, 800, 600]); // oldest first
+  });
+
+  it("pruneBefore removes a listing's price events with it", () => {
+    const store = new Store(dbPath);
+    const l = listing("p2", 1000, "raf");
+    store.upsertListing(l);
+    store.upsertListing({ ...l, price: 500 });
+    expect(store.priceEvents("yahoo:p2")).toHaveLength(2);
+    // Pretend the row aged out, then prune it.
+    store.db
+      .prepare("UPDATE listings SET updatedAt = ? WHERE key = 'yahoo:p2'")
+      .run(new Date(Date.now() - 40 * 86_400_000).toISOString());
+    store.pruneBefore(new Date(Date.now() - 30 * 86_400_000).toISOString());
+    expect(store.get("yahoo", "p2")).toBeUndefined();
+    expect(store.priceEvents("yahoo:p2")).toEqual([]); // no orphaned history
+  });
+
   it("sellThroughByBrand: gone-now share per brand, honest on stale and missing data", () => {
     const store = new Store(dbPath);
     const seed = (id: string, brand: string, missing: boolean) => {
