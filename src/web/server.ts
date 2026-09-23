@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import type { Store } from "../core/store.js";
 import { ALL_MARKETS, MARKET_LABEL } from "../types.js";
-import { BRANDS } from "../config/brands.js";
+import { BRANDS, getBrand } from "../config/brands.js";
 import { THRESHOLD_RULES } from "../config/rules.js";
 import type { Deal } from "../types.js";
 import { fetchThumb, isAllowedImageUrl } from "./thumbs.js";
@@ -97,6 +97,8 @@ const PAGE = `
   .finds-head::before { content:""; width:8px; height:8px; border-radius:999px; background:#3fb950; box-shadow:0 0 8px rgba(63,185,80,.4); }
   .tier { border-radius:999px; padding:1px 8px; font-size:11px; font-weight:700; margin-right:8px; }
   .fast { border-radius:999px; padding:1px 8px; font-size:11px; font-weight:600; margin-right:8px; background:rgba(46,204,113,.12); color:#2ecc71; }
+  .vchip { border-radius:999px; padding:2px 10px; font-size:11px; margin-right:8px; display:inline-block; margin-bottom:4px; color:#8b949e; background:rgba(139,148,158,.1); }
+  .vchip.hot { color:#e67e22; background:rgba(230,126,34,.12); }
   .tier-S { background:#1f6feb; color:#ffffff; }
   .tier-A { background:#238636; color:#ffffff; }
   .tier-B { background:#9e6a03; color:#ffffff; }
@@ -132,6 +134,10 @@ const PAGE = `
 <section id="finds">
   <h2 class="finds-head">Finds of the day</h2>
   <div id="findsPulse"></div>
+</section>
+<section id="velocity">
+  <h2 class="finds-head">Brand velocity</h2>
+  <div id="velocityRow" aria-label="How fast each brand's listings vanish, over its last 20 sightings"></div>
 </section>
 <main id="feed"><div class="empty">Scouting markets — first deals land within minutes.</div></main>
 <script>
@@ -173,6 +179,28 @@ const PAGE = `
   }
   loadFinds();
   setInterval(loadFinds, 60000);
+  // Brand velocity: gone-within-48h churn per brand, over its last 20
+  // sightings. DOM APIs only — marketplace-adjacent data never touches markup.
+  async function loadVelocity() {
+    const row = document.getElementById("velocityRow");
+    if (!row) return;
+    let data;
+    try {
+      const res = await fetch("/api/velocity");
+      data = await res.json();
+    } catch { return; }
+    row.textContent = "";
+    for (const v of data.brands || []) {
+      const chip = document.createElement("span");
+      chip.className = "vchip" + (v.rate >= 0.5 ? " hot" : "");
+      chip.textContent = v.name + " " + v.goneWithin48h + "/" + v.observed + " gone≤48h";
+      chip.title = v.observed + " sightings considered; " + v.goneWithin48h +
+        " vanished within 48h of being found. Gone = absent from recent poll rounds — absence is not proof of sale.";
+      row.appendChild(chip);
+    }
+  }
+  loadVelocity();
+  setInterval(loadVelocity, 60000);
   let timer;
   async function refresh() {
     const p = new URLSearchParams();
@@ -403,6 +431,16 @@ export function startDashboard(
       a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
     );
     return sizes;
+  });
+
+  /** Brand velocity — the /velocity command's metric, for the dashboard. */
+  app.get("/api/velocity", async () => {
+    const all = store.brandVelocityAll(20);
+    const brands = [...all.entries()]
+      .filter(([, s]) => s.observed > 0)
+      .map(([key, s]) => ({ key, name: getBrand(key)?.name ?? key, ...s }))
+      .sort((a, b) => b.rate - a.rate || b.observed - a.observed);
+    return { brands };
   });
 
   app.get("/api/health", async () => {

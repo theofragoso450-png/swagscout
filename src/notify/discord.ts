@@ -9,7 +9,7 @@ import {
 } from "discord.js";
 import type { Deal, MarketHealth, PollResult } from "../types.js";
 import { MARKET_LABEL } from "../types.js";
-import { BRANDS } from "../config/brands.js";
+import { BRANDS, getBrand } from "../config/brands.js";
 import type { Store } from "../core/store.js";
 import { logger } from "../logger.js";
 import { buildDealEmbed, buildDealEmbeds, buildFindEmbeds, type EmbedPayload } from "./embeds.js";
@@ -135,6 +135,13 @@ export class DiscordNotifier {
         .addIntegerOption((o) =>
           o.setName("hours").setDescription("Look-back window in hours (default 24)").setRequired(false),
         ),
+      watchOption(
+        new SlashCommandBuilder()
+          .setName("velocity")
+          .setDescription("How fast a brand's listings vanish (gone-within-48h rate)"),
+      ).addIntegerOption((o) =>
+        o.setName("observations").setDescription("Last N sightings to consider (default 20, max 50)").setRequired(false),
+      ),
     ].map((c) => c.toJSON());
 
     const rest = new REST({ version: "10" }).setToken(appToken);
@@ -156,6 +163,8 @@ export class DiscordNotifier {
         return this.cmdDeals(i);
       case "finds":
         return this.cmdFinds(i);
+      case "velocity":
+        return this.cmdVelocity(i);
     }
   }
 
@@ -242,6 +251,12 @@ export class DiscordNotifier {
       return;
     }
     await i.reply({ embeds: buildDealEmbeds(deals), ephemeral: true });
+  }
+
+  private async cmdVelocity(i: ChatInputCommandInteraction): Promise<void> {
+    const brandKey = (i.options.getString("brand") ?? "").trim();
+    const n = Math.min(Math.max(i.options.getInteger("observations") ?? 20, 1), 50);
+    await i.reply({ content: velocityReply(this.store, brandKey, n), ephemeral: true });
   }
 
   private async cmdFinds(i: ChatInputCommandInteraction): Promise<void> {
@@ -343,4 +358,29 @@ export class DiscordNotifier {
       throw new Error(`webhook ${res.status}: ${(await res.text()).slice(0, 200)}`);
     }
   }
+}
+
+/**
+ * Pure /velocity reply text — the exit gate asserts this equals a direct SQL
+ * read of the live store. Honest labels: "vanished within 48h of being
+ * found" is churn of listings, never a claim that any piece sold.
+ */
+export function velocityReply(store: Store, brandKey: string, n = 20): string {
+  const brand = getBrand(brandKey);
+  const key = brand?.key ?? brandKey;
+  if (!key) {
+    return "Unknown brand. Try `/brands` for the catalog, or `/velocity brand:<key>` with a key from it.";
+  }
+  const stat = store.brandVelocity(key, n);
+  if (stat.observed === 0) {
+    return brand
+      ? `**${brand.name}**: no sightings stored yet — velocity appears once the poller has seen listings for this brand.`
+      : `**${key}** is not a catalog brand and has no stored sightings — see \`/brands\` for valid keys.`;
+  }
+  const pct = Math.round(stat.rate * 100);
+  return [
+    `**${brand?.name ?? key}** — last ${stat.observed} sighting${stat.observed === 1 ? "" : "s"}:`,
+    `${stat.goneWithin48h}/${stat.observed} vanished within 48h of being found (**${pct}%**)`,
+    `_Gone = absent from recent poll rounds — absence is not proof of sale._`,
+  ].join("\n");
 }
