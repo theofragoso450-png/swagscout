@@ -69,6 +69,9 @@ export function extractSize(title: string): string | undefined {
  */
 export function extractCondition(title: string): string | undefined {
   const t = title.toLowerCase();
+  // Junk first: a ジャンク listing often also says 中古, and the worse grade
+  // must win. 動作確認済み ("tested, works") is deliberately NOT junk.
+  if (/ジャンク|junk|for parts|for repair|動作不良|故障品?|破損|damaged|難あり/.test(t)) return "junk";
   if (/新品同様|未使用品?|deadstock|\bun-?used\b|never\s+(?:been\s+)?used/.test(t)) return "new";
   if (/美品|良品|near mint|excellent/.test(t)) return "like-new";
   // "un-used"/"unused" must not degrade to "used" — hence the lookbehind.

@@ -1,5 +1,6 @@
 import type { Deal, DealReason, Listing } from "../types.js";
 import { evaluateThreshold } from "../config/rules.js";
+import { extractCondition } from "./normalize.js";
 import { findComps, DEFAULT_COMP_OPTIONS, type CompOptions } from "./comps.js";
 import type { StoredListing, Store } from "./store.js";
 import { proxyLinks } from "../proxy/links.js";
@@ -39,11 +40,15 @@ export function evaluateDeal(
   }
   const candidate: Listing = { ...l, priceUsd: candidateUsd };
 
-  // 1) Static threshold rule
+  // 1) Static threshold rule. Condition is derived from the title the
+  // evaluation actually sees — the stored column is only a display cache and
+  // can be stale relative to a replaced/spread title. Deriving keeps
+  // condition-aware caps honest without a column migration.
   const threshold = evaluateThreshold({
     brandKey: candidate.brandKey,
     title: candidate.title,
     priceUsd: candidateUsd,
+    condition: extractCondition(candidate.title),
   });
   if (threshold) {
     reasons.push({ kind: "threshold", capUsd: threshold.maxUsd, note: threshold.note });
