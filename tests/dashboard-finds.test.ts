@@ -44,10 +44,39 @@ function seed(id: string, reasons: Array<{ kind: string; detail: string }>): voi
   store.recordDeal({ listing: l, proxy: {}, reasons: reasons as never, score: 50 });
 }
 
+/** Same deal path, with a junk-grade title so condition filters have a target. */
+function seedJunk(id: string): void {
+  const l = listing(id);
+  l.title = `ジャンク品 ${l.title}`;
+  store.upsertListing(l);
+  store.recordDeal({ listing: l, proxy: {}, reasons: [{ kind: "threshold", detail: "test" }] as never, score: 40 });
+}
+
 async function boot(): Promise<number> {
   server = startDashboard(store, 0, () => "test");
   return server.start();
 }
+
+describe("/api/deals condition filter", () => {
+  it("isolates junk-grade listings via ?condition=junk and excludes them from the unfiltered view", async () => {
+    seed("f1", [{ kind: "comp", detail: "50% below 20-listing median ($400)" }]);
+    seed("f2", [{ kind: "threshold", detail: "test" }]);
+    seedJunk("j1");
+    const port = await boot();
+
+    const all = (await (await fetch(`http://127.0.0.1:${port}/api/deals`)).json()) as {
+      deals: Array<{ title: string; condition: string | null }>;
+    };
+    expect(all.deals.map((d) => d.title).sort()).toEqual(["test item f1", "test item f2", "ジャンク品 test item j1"].sort());
+    expect(all.deals.find((d) => d.title === "ジャンク品 test item j1")?.condition).toBe("junk");
+
+    const junk = (await (await fetch(`http://127.0.0.1:${port}/api/deals?condition=junk`)).json()) as {
+      deals: Array<{ title: string; condition: string | null }>;
+    };
+    expect(junk.deals.map((d) => d.title)).toEqual(["ジャンク品 test item j1"]);
+    expect(junk.deals).toHaveLength(1);
+  });
+});
 
 describe("/api/finds", () => {
   it("ranks comp-backed deals and excludes threshold-only ones", async () => {

@@ -14,6 +14,7 @@ const CONDITION_LABEL: Record<string, string> = {
   new: "New",
   "like-new": "Like new",
   used: "Used",
+  junk: "Junk/damaged",
 };
 
 /**
@@ -124,6 +125,7 @@ const PAGE = `
   <select id="market" aria-label="Market"><option value="">All markets</option></select>
   <select id="brand" aria-label="Brand"><option value="">All brands</option></select>
   <select id="size" aria-label="Size"><option value="">All sizes</option></select>
+  <select id="condition" aria-label="Condition"><option value="">All conditions</option><option value="junk">Junk/damaged only</option></select>
   <select id="sort" aria-label="Sort by">
     <option value="found">Newest</option>
     <option value="score">Best score</option>
@@ -207,11 +209,13 @@ const PAGE = `
     const m = document.getElementById("market").value;
     const b = document.getElementById("brand").value;
     const z = sizeSel.value;
+    const c = document.getElementById("condition").value;
     const s = document.getElementById("sort").value;
     const q = document.getElementById("q").value;
     if (m) p.set("market", m);
     if (b) p.set("brand", b);
     if (z) p.set("size", z);
+    if (c) p.set("condition", c);
     if (s) p.set("sort", s);
     if (q) p.set("q", q);
     let data;
@@ -264,7 +268,7 @@ const PAGE = `
     if (live) live.textContent = ok ? "Live — feed updated" : "Feed fetch failed — retrying";
   }
   function clearFilters() {
-    for (const id of ["market", "brand", "size"]) document.getElementById(id).value = "";
+    for (const id of ["market", "brand", "size", "condition"]) document.getElementById(id).value = "";
     // sort has no empty option — resetting to "" would blank the dropdown.
     document.getElementById("sort").value = "found";
     document.getElementById("q").value = "";
@@ -345,6 +349,7 @@ export function startDashboard(
     market?: string;
     brand?: string;
     size?: string;
+    condition?: string;
     sort?: string;
     q?: string;
   }
@@ -385,7 +390,7 @@ export function startDashboard(
   }
 
   app.get<{ Querystring: DealsQuery }>("/api/deals", async (req) => {
-    const { market, brand, size, sort, q } = req.query;
+    const { market, brand, size, condition, sort, q } = req.query;
     // NB: "all" is a wildcard inside recentDeals — adding it alongside a
     // brand key would make the brand filter a no-op. The third arg scopes
     // the SQL to the brand so niche brands aren't starved by newer deals.
@@ -398,6 +403,12 @@ export function startDashboard(
       deals = deals.filter((d) => (d.listing.size ?? "").toLowerCase() === want);
     }
     if (market) deals = deals.filter((d) => d.listing.market === market);
+    // Title-derived at read time (the stored column is only a display cache);
+    // exact match like the size filter — a listing without the grade never
+    // matches a condition-filtered view.
+    if (condition) {
+      deals = deals.filter((d) => (extractCondition(d.listing.title) ?? null) === condition);
+    }
     if (q) deals = deals.filter((d) => d.listing.title.toLowerCase().includes(q.toLowerCase()));
     if (sort === "score") deals = [...deals].sort((a, b) => b.score - a.score);
     if (sort === "price") deals = [...deals].sort((a, b) => a.listing.priceUsd - b.listing.priceUsd);
