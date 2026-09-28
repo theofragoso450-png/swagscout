@@ -93,7 +93,7 @@ describe("dashboard accessibility contract", () => {
 
   it("reserves a polite live-region results count line above the feed", async () => {
     const html = await page(await boot());
-    expect(html).toContain('<div id="results" class="results" role="status" aria-live="polite"></div>');
+    expect(html).toContain('<div id="results" class="results" role="status" aria-live="polite" tabindex="-1"></div>');
     expect(html).toContain(".results {");
   });
 
