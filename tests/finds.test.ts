@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { findsScore, classifyRarity, rankFinds, FAST_MOVER_SHARE } from "../src/notify/finds.js";
 import { compFacts } from "../src/core/reasons.js";
+import { extractCondition } from "../src/core/normalize.js";
 import type { Deal } from "../src/types.js";
 
 const NOW = Date.parse("2026-09-18T12:00:00Z");
@@ -81,6 +82,14 @@ describe("findsScore", () => {
   it("scores threshold-only deals 0", () => {
     expect(findsScore(thresholdDeal())).toBe(0);
   });
+
+  it("halves a junk-grade find's score", () => {
+    const healthy = compDeal({ discount: 60, sample: 50, median: 1500 }); // 56
+    const junk = compDeal({ discount: 60, sample: 50, median: 1500, title: "Yohji coat ジャンク" });
+    expect(findsScore(healthy)).toBe(56);
+    expect(extractCondition(junk.listing.title)).toBe("junk");
+    expect(findsScore(junk)).toBe(28);
+  });
 });
 
 describe("classifyRarity", () => {
@@ -92,6 +101,13 @@ describe("classifyRarity", () => {
     expect(classifyRarity(39)).toBe("B");
     expect(classifyRarity(25)).toBe("B");
     expect(classifyRarity(24)).toBe("C");
+  });
+
+  it("caps a junk-grade find at B regardless of score", () => {
+    expect(classifyRarity(60, "junk")).toBe("B");
+    expect(classifyRarity(55, "junk")).toBe("B");
+    expect(classifyRarity(30, "junk")).toBe("B");
+    expect(classifyRarity(24, "junk")).toBe("C");
   });
 });
 
@@ -214,5 +230,15 @@ describe("rankFinds", () => {
     const recent = compDeal({ discount: 40, sample: 20, median: 300, hoursAgo: 2 });
     const old = compDeal({ discount: 60, sample: 50, median: 1500, hoursAgo: 5 });
     expect(rankFinds([recent, old], 3, NOW).map((f) => f.deal)).toEqual([recent]);
+  });
+
+  it("never presents a junk-grade piece as A or S tier", () => {
+    // Raw comps would make this an S find (56); junk halves and caps it.
+    const junk = compDeal({ discount: 60, sample: 50, median: 1500, title: "Yohji coat ジャンク" });
+    const healthy = compDeal({ discount: 39.5, sample: 22, median: 420, hoursAgo: 2 }); // 46, A
+    const finds = rankFinds([junk, healthy], 24, NOW);
+    expect(finds.map((f) => f.rarity)).toEqual(["A", "B"]);
+    expect(finds.map((f) => f.findsScore)).toEqual([46, 28]);
+    expect(finds.find((f) => f.deal === junk)?.rarity).toBe("B");
   });
 });
