@@ -46,8 +46,10 @@ export interface DigestTickResult {
  * One scheduler pass: if the slot is due and not yet sent, rank and post.
  * The meta key records the exact slot instant — idempotent across restarts,
  * and a boot after the slot still delivers the morning post. Snapshot
- * semantics: the digest is whatever the top finds are at send time (an empty
- * or unsendable digest still marks the slot done — no retry all day).
+ * semantics: the digest is whatever the top finds are at send time. A send
+ * failure (every channel failed) is retried on later ticks the same day;
+ * an empty catalog or a day with no subscribed channels marks the slot
+ * done — retrying cannot create finds or channels.
  */
 export async function digestTick(
   now: number,

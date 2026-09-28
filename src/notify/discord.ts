@@ -210,13 +210,33 @@ export class DiscordNotifier {
 
   private async cmdBrands(i: ChatInputCommandInteraction): Promise<void> {
     const lines = BRANDS.map((b) => `**${b.name}** — \`${b.key}\``);
-    await i.reply({ content: lines.join("\n").slice(0, 1900), ephemeral: true });
+    // Discord caps a message at 2000 chars AFTER markdown escaping, and a raw
+    // slice can split a code span into broken markdown. Page at line
+    // boundaries instead of truncating — a truncated catalog hides brands
+    // with no indication anything is missing.
+    const pages = brandCatalogPages(lines);
+    if (pages.length <= 1) {
+      await i.reply({ content: lines.join("\n"), ephemeral: true });
+      return;
+    }
+    await i.reply({
+      content: `_Catalog is ${pages.length} pages — showing 1/${pages.length}. Ask again with a brand key from \`/brands\`._\n\n${pages[0]}`.slice(0, 2000),
+      ephemeral: true,
+    });
+    for (let p = 1; p < pages.length; p++) {
+      await i.followUp({
+        content: `_…continued ${p + 1}/${pages.length}_\n\n${pages[p]}`.slice(0, 2000),
+        ephemeral: true,
+      });
+    }
   }
 
   private async cmdStatus(i: ChatInputCommandInteraction): Promise<void> {
     const subs = this.store.listSubscriptions().length;
     const tracked = this.store.recentListings(24 * 14).length;
-    const deals = this.store.recentDeals(["all"], 1).length;
+    // count the full documented window — a 1-row probe made this line say
+    // "available" regardless of whether 3 or 3,000 deals exist
+    const deals = this.store.recentDeals(["all"], 2000).length;
     // Market liveness: ✓ answered, ! last attempt failed, ? never recorded.
     const ago = (ms: number) => {
       const m = Math.round((Date.now() - ms) / 60_000);
@@ -233,7 +253,9 @@ export class DiscordNotifier {
         ...marketLines,
         `👀 Subscriptions: ${subs}`,
         `🗂 Listings tracked (14d): ${tracked}`,
-        deals > 0 ? "💾 Deal history: available" : "💾 Deal history: empty",
+        deals > 0
+          ? `💾 Deal history (14d): ${deals} deal${deals === 1 ? "" : "s"}`
+          : "💾 Deal history: none recorded yet",
       ].join("\n"),
       ephemeral: true,
     });
@@ -358,6 +380,27 @@ export class DiscordNotifier {
       throw new Error(`webhook ${res.status}: ${(await res.text()).slice(0, 200)}`);
     }
   }
+}
+
+/**
+ * Split catalog lines into pages whose escaped length fits a Discord message
+ * with room for the page header. Never splits mid-line and never truncates:
+ * every line survives intact on some page.
+ */
+export function brandCatalogPages(lines: string[], budget = 1700): string[] {
+  const escapedLen = (s: string): number => s.replace(/[\\`*_~\[\]()<>|]/g, "x").length;
+  const pages: string[] = [];
+  let cur: string[] = [];
+  for (const line of lines) {
+    cur.push(line);
+    if (escapedLen(cur.join("\n")) > budget && cur.length > 1) {
+      const overflow = cur.pop()!;
+      pages.push(cur.join("\n"));
+      cur = [overflow];
+    }
+  }
+  if (cur.length) pages.push(cur.join("\n"));
+  return pages;
 }
 
 /**
