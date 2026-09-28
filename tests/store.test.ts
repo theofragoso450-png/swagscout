@@ -83,14 +83,21 @@ describe("Store", () => {
     seed("c2", "cdg", false);
     seed("u1");
     seed("u2");
-    const v = store.sellThroughByBrand(24);
+    // A brand with no fresh ingest inside the cutoff is dropped entirely:
+    // a paused or blocked market must not read as stellar sell-through.
+    // `now` is pinned one minute ahead of every write on purpose: the
+    // cutoff math is `updatedAt >= now - hours`, and with the default
+    // Date.now() a 0-hour cutoff equals the query's exact millisecond —
+    // on a fast CI box the last seed write can land on that same
+    // millisecond and flip a brand back to "fresh". An explicit future
+    // `now` keeps both assertions deterministic (rows are 24h-fresh, and
+    // strictly stale at zero hours) no matter how coarse the clock is.
+    const now = Date.now() + 60_000;
+    const v = store.sellThroughByBrand(24, now);
     expect(v.get("yohji")).toEqual({ gone: 3, total: 4, share: 0.75 });
     expect(v.get("cdg")).toEqual({ gone: 0, total: 2, share: 0 });
     expect(v.has("raf")).toBe(false); // unbranded rows never pollute the map
-
-    // A brand with no fresh ingest inside the cutoff is dropped entirely:
-    // a paused or blocked market must not read as stellar sell-through.
-    const old = store.sellThroughByBrand(0);
+    const old = store.sellThroughByBrand(0, now);
     expect(old.has("yohji")).toBe(false);
     expect(old.has("cdg")).toBe(false);
   });
