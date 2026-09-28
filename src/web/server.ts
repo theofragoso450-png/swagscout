@@ -54,6 +54,7 @@ const PAGE = `
 <head>
 <meta charset="utf-8">
 <title>SwagScout — archive fashion deals</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Crect%20width='16'%20height='16'%20rx='3'%20fill='%230d1117'/%3E%3Ccircle%20cx='8'%20cy='8'%20r='4'%20fill='%233fb950'/%3E%3C/svg%3E">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -90,6 +91,7 @@ const PAGE = `
   .badge.miss { color:#8b949e; font-style:italic; }
   .reasons { font-size:12px; color:#d29922; margin-top:4px; }
   .proxies a { color:#58a6ff; font-size:12px; margin-right:8px; text-decoration:none; }
+  .results { font-size:12px; color:#8b949e; padding:12px 0 10px; min-height:16px; }
   .empty { color:#8b949e; padding:40px 0; text-align:center; font-size:14px; position:relative; }
   .empty .imgph { width:44px; height:44px; margin:0 auto 10px; display:block; opacity:.5; }
   .link { background:none; border:none; color:#58a6ff; cursor:pointer; font-size:13px; padding:2px 4px; }
@@ -105,9 +107,14 @@ const PAGE = `
   .tier-B { background:#9e6a03; color:#ffffff; }
   .tier-C { background:#30363d; color:#c9d1d9; }
   .finds-empty { color:#8b949e; font-size:13px; margin:10px 0 4px; }
-  .dot { width:8px; height:8px; border-radius:999px; background:#30363d; display:inline-block; margin-right:6px; transition:background .4s, box-shadow .4s; }
+  .dot { width:8px; height:8px; border-radius:999px; background:#30363d; display:inline-block; margin-right:6px; }
   .dot.on { background:#3fb950; box-shadow:0 0 6px rgba(63,185,80,.5); }
   .dot.err { background:#d29922; box-shadow:0 0 6px rgba(210,153,34,.5); }
+  /* the live dot breathes while connected — the page's one ambient cue
+     that data is still flowing; still under reduced-motion preferences */
+  @keyframes breathe { 0%,100% { opacity:1; } 50% { opacity:.55; } }
+  .dot.on { animation:breathe 2.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .dot.on { animation:none; } }
   .mchip.m-bad { color:#f0883e; font-weight:600; cursor:help; }
   .mchip.m-unk { color:#8b949e; border-bottom:1px dashed #3d444d; cursor:help; }
   .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
@@ -119,7 +126,7 @@ const PAGE = `
     <h1>Swag<span>Scout</span></h1>
     <div class="tagline">Live cross-market scout for archive fashion deals</div>
   </div>
-  <div class="sub"><span id="dot" aria-hidden="true"></span><span id="live" class="sr-only" role="status" aria-live="polite"></span><span id="stats">loading…</span></div>
+  <div class="sub"><span id="dot" class="dot" aria-hidden="true"></span><span id="live" class="sr-only" role="status" aria-live="polite"></span><span id="stats">loading…</span></div>
 </header>
 <div class="bar">
   <select id="market" aria-label="Market"><option value="">All markets</option></select>
@@ -141,6 +148,7 @@ const PAGE = `
   <h2 class="finds-head">Brand velocity</h2>
   <div id="velocityRow" aria-label="How fast each brand's listings vanish, over its last 20 sightings"></div>
 </section>
+<div id="results" class="results" role="status" aria-live="polite"></div>
 <main id="feed"><div class="empty">Scouting markets — first deals land within minutes.</div></main>
 <script>
   const markets = ${JSON.stringify(ALL_MARKETS.map((m) => ({ id: m, label: MARKET_LABEL[m] })))};
@@ -228,11 +236,15 @@ const PAGE = `
     } catch { markLive(false); return; }
     markLive(true);
     const feed = document.getElementById("feed");
+    const results = document.getElementById("results");
     if (!data.deals.length) {
+      // textContent only — marketplace-adjacent values never touch markup.
+      if (results) results.textContent = "0 deals match the current filters.";
       feed.innerHTML = '<div class="empty">' + PLACEHOLDER + '<div>No deals match your filters.</div><button class="link" id="clearFilters">Clear filters</button></div>';
       const cf = document.getElementById("clearFilters");
       if (cf) cf.addEventListener("click", clearFilters);
     } else {
+      if (results) results.textContent = data.shown + " of " + data.matched + " deals shown";
       feed.innerHTML = data.deals.map(render).join("");
     }
     renderStats(data);
@@ -263,8 +275,12 @@ const PAGE = `
   const live = document.getElementById("live");
   function markLive(ok) {
     if (!dot) return;
-    dot.classList.toggle("on", ok);
-    dot.classList.toggle("err", !ok);
+    // Full class string: the base class carries size/color hooks the state
+    // classes stack onto — toggling alone once lost it and the dot vanished.
+    // Only written on an actual state change: reassigning the same string
+    // invalidates style and would restart the dot's breathe every refresh.
+    const next = ok ? "dot on" : "dot err";
+    if (dot.className !== next) dot.className = next;
     if (live) live.textContent = ok ? "Live — feed updated" : "Feed fetch failed — retrying";
   }
   function clearFilters() {
@@ -289,7 +305,7 @@ const PAGE = `
     const reasons = (d.reasons||[]).filter(r => !isFind || r.kind === "comp").map(r => "• " + r.detail).join(" &nbsp; ");
     const proxies = Object.entries(d.proxy||{}).map(([k,v]) => \`<a href="\${escapeHtml(safeUrl(v))}" target="_blank">\${escapeHtml(k[0].toUpperCase()+k.slice(1))}</a>\`).join("");
     return \`<div class="deal">
-      \${d.imageUrl ? \`<img src="\${escapeHtml(safeUrl(d.imageUrl))}" alt="" loading="lazy" onerror="this.classList.add('imgph');this.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='">\` : "<img class='img imgph' src='data:image/gif;base64,R0lGODlhAQABAAAAACw=' alt=''>"}
+      \${d.imageUrl ? \`<img src="\${escapeHtml(safeUrl(d.imageUrl))}" alt="" loading="lazy" onerror="this.classList.add('imgph');this.src='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'">\` : "<img class='img imgph' src='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' alt=''>"}
       <div class="meta">
         <div class="title">\${d.rank != null ? \`<span class="tier tier-\${escapeHtml(d.tier)}">\${escapeHtml(d.findLabel)}</span>\${d.fast ? '<span class="fast" title="Pieces from this brand tend to stop being listed soon (gone-now share of its current stock). Absence is not proof of sale.">⚡ fast mover</span>' : ""}\` : ""}<a href="\${escapeHtml(safeUrl(d.url))}" target="_blank"\${d.titleLang ? \` lang="\${escapeHtml(d.titleLang)}"\` : ""}>\${escapeHtml(d.title)}</a></div>
         <div class="row">
@@ -314,7 +330,7 @@ const PAGE = `
   function escapeHtml(s) {
     return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
-  for (const id of ["market", "brand", "size", "sort"]) document.getElementById(id).addEventListener("change", refresh);
+  for (const id of ["market", "brand", "size", "condition", "sort"]) document.getElementById(id).addEventListener("change", refresh);
   let debounceTimer;
   document.getElementById("q").addEventListener("input", () => {
     clearTimeout(debounceTimer);
@@ -415,6 +431,11 @@ export function startDashboard(
 
     return {
       deals: deals.slice(0, 80).map(dealItem),
+      /** Post-filter total: the header stats are global, so the count line
+       *  above the feed needs this to say how many deals the filters matched
+       *  (shown caps at 80; matched can exceed it). */
+      matched: deals.length,
+      shown: Math.min(deals.length, 80),
       stats: getStats(),
       /** Per-market liveness for the status chips (see renderStats client-side). */
       marketHealth: store.marketHealth(),

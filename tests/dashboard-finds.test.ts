@@ -66,15 +66,61 @@ describe("/api/deals condition filter", () => {
 
     const all = (await (await fetch(`http://127.0.0.1:${port}/api/deals`)).json()) as {
       deals: Array<{ title: string; condition: string | null }>;
+      matched: number;
+      shown: number;
     };
     expect(all.deals.map((d) => d.title).sort()).toEqual(["test item f1", "test item f2", "ジャンク品 test item j1"].sort());
     expect(all.deals.find((d) => d.title === "ジャンク品 test item j1")?.condition).toBe("junk");
+    // count envelope: post-filter total and rendered page size
+    expect(all.matched).toBe(3);
+    expect(all.shown).toBe(3);
 
     const junk = (await (await fetch(`http://127.0.0.1:${port}/api/deals?condition=junk`)).json()) as {
       deals: Array<{ title: string; condition: string | null }>;
+      matched: number;
+      shown: number;
     };
     expect(junk.deals.map((d) => d.title)).toEqual(["ジャンク品 test item j1"]);
     expect(junk.deals).toHaveLength(1);
+    expect(junk.matched).toBe(1);
+    expect(junk.shown).toBe(1);
+  });
+});
+
+describe("/api/deals matched/shown envelope", () => {
+  it("reports the post-filter total separately from the 80-card page", async () => {
+    for (let i = 1; i <= 85; i++) seed(`c${i}`, [{ kind: "threshold", detail: "test" }]);
+    const port = await boot();
+    const json = (await (await fetch(`http://127.0.0.1:${port}/api/deals`)).json()) as {
+      deals: unknown[];
+      matched: number;
+      shown: number;
+    };
+    expect(json.matched).toBe(85);
+    expect(json.shown).toBe(80);
+    expect(json.deals).toHaveLength(80);
+  });
+
+  it("keeps matched/shown honest under an active filter", async () => {
+    for (let i = 1; i <= 85; i++) seed(`c${i}`, [{ kind: "threshold", detail: "test" }]);
+    seedJunk("cj");
+    const port = await boot();
+    const json = (await (await fetch(`http://127.0.0.1:${port}/api/deals?condition=junk`)).json()) as {
+      matched: number;
+      shown: number;
+      deals: Array<{ condition: string | null }>;
+    };
+    expect(json.matched).toBe(1);
+    expect(json.shown).toBe(1);
+    expect(json.deals[0]!.condition).toBe("junk");
+  });
+
+  it("wires the condition select to the feed refresh (it once refreshed nothing)", async () => {
+    const port = await boot();
+    const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    // #67 shipped the select without adding it to the change-event loop, so
+    // the control sat inert in the browser while the API answered fine.
+    expect(html).toContain('for (const id of ["market", "brand", "size", "condition", "sort"])');
   });
 });
 

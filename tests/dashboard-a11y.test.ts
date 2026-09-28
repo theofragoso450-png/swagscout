@@ -85,10 +85,24 @@ describe("dashboard accessibility contract", () => {
   it("exposes connection state as a polite live region instead of color alone", async () => {
     const html = await page(await boot());
     // the dot is decorative; markLive() announces state through #live
-    expect(html).toContain('<span id="dot" aria-hidden="true"></span>');
+    expect(html).toContain('<span id="dot" class="dot" aria-hidden="true"></span>');
     expect(html).toMatch(/id="live"[^>]*role="status"[^>]*aria-live="polite"/);
     // without the sr-only rule the region would render visibly in the header
     expect(html).toContain(".sr-only {");
+  });
+
+  it("reserves a polite live-region results count line above the feed", async () => {
+    const html = await page(await boot());
+    expect(html).toContain('<div id="results" class="results" role="status" aria-live="polite"></div>');
+    expect(html).toContain(".results {");
+  });
+
+  it("updates the count line via textContent, never markup injection", async () => {
+    const html = await page(await boot());
+    // both render branches write textContent; no innerHTML path to the line
+    expect(html).toContain('results.textContent = "0 deals match the current filters."');
+    expect(html).toContain('results.textContent = data.shown + " of " + data.matched + " deals shown"');
+    expect(html).not.toMatch(/results\.innerHTML/);
   });
 });
 
