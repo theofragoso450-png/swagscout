@@ -54,7 +54,7 @@ Your deals database lives in the `data` folder the compose file mounts, so stopp
 
 ### Path B — Node.js (no Docker)
 
-1. **Install Node.js:** download the **23.x (or newer) LTS** installer from <https://nodejs.org/> and accept the defaults. Verify: open a terminal anywhere, type `node -v`, press Enter — you should see `v23.x.x` or higher.
+1. **Install Node.js:** download the **24.x LTS** installer from <https://nodejs.org/> and accept the defaults (any Node 23+ runtime works). Verify: open a terminal anywhere, type `node -v`, press Enter — you should see `v23.x.x`, `v24.x.x`, or higher.
 2. **Get SwagScout onto your computer:** same as Path A step 2 (Download ZIP, unzip).
 3. **Make your settings file:** same as Path A step 3 (copy `.env.example` to `.env`, fill in `DISCORD_TOKEN=` and optionally `DISCORD_ALLOWED_CHANNELS=`).
 4. **Install and start:** open a terminal in the project folder (address bar → type `powershell` → Enter) and run:
