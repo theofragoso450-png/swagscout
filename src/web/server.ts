@@ -162,6 +162,20 @@ const PAGE = `
     document.getElementById("brand").insertAdjacentHTML("beforeend", \`<option value="\${b.key}">\${b.name}</option>\`);
   }
   const sizeSel = document.getElementById("size");
+  // Shared/filtered views: the querystring is the source of truth on load —
+  // filters preselect from it (unknown values fall back to "All …") so a
+  // reloaded or shared URL restores the exact view. Size options load
+  // async, so ?size= preselects right after the first option rebuild —
+  // the first feed fetch waits for that (boot chain at the bottom).
+  const params = new URLSearchParams(location.search);
+  const paramVal = (k) => params.get(k) || "";
+  for (const id of ["market", "brand", "condition", "sort"]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const v = paramVal(id);
+    if ([...el.options].some((o) => o.value === v)) el.value = v;
+  }
+  document.getElementById("q").value = paramVal("q");
   async function rebuildSizeOptions() {
     const keep = sizeSel.value;
     const res = await fetch("/api/sizes");
@@ -171,7 +185,6 @@ const PAGE = `
     if ([...sizeSel.options].some((o) => o.value === keep)) sizeSel.value = keep;
     else sizeSel.value = "";
   }
-  rebuildSizeOptions();
   setInterval(rebuildSizeOptions, 60000);
   async function loadFinds() {
     const pulse = document.getElementById("findsPulse");
@@ -211,6 +224,20 @@ const PAGE = `
   }
   loadVelocity();
   setInterval(loadVelocity, 60000);
+  // Mirror active filters into the address bar via replaceState: shareable,
+  // reload-stable, and no history entry per 20-second poll. Defaults are
+  // omitted so an all-defaults view carries a clean URL.
+  function syncUrl() {
+    const sp = new URLSearchParams();
+    for (const id of ["market", "brand", "size", "condition", "sort"]) {
+      const v = document.getElementById(id).value;
+      if (v && !(id === "sort" && v === "found")) sp.set(id, v);
+    }
+    const q = document.getElementById("q").value;
+    if (q) sp.set("q", q);
+    const qs = sp.toString();
+    history.replaceState(null, "", location.pathname + (qs ? "?" + qs : ""));
+  }
   let timer;
   async function refresh() {
     const p = new URLSearchParams();
@@ -235,6 +262,7 @@ const PAGE = `
       data = await res.json();
     } catch { markLive(false); return; }
     markLive(true);
+    syncUrl();
     const feed = document.getElementById("feed");
     const results = document.getElementById("results");
     if (!data.deals.length) {
@@ -288,6 +316,7 @@ const PAGE = `
     // sort has no empty option — resetting to "" would blank the dropdown.
     document.getElementById("sort").value = "found";
     document.getElementById("q").value = "";
+    syncUrl();
     refresh();
   }
   // Marketplace-controlled URLs (listing + proxy links) must never carry an
@@ -336,8 +365,17 @@ const PAGE = `
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(refresh, 300);
   });
-  refresh();
-  setInterval(refresh, 20000);
+  // First feed load waits for the size options so a shared ?size= can
+  // preselect before the initial fetch (otherwise the first syncUrl would
+  // drop it); later rebuilds preserve the value via keep-current-value.
+  rebuildSizeOptions()
+    .catch(() => {})
+    .then(() => {
+      const v = paramVal("size");
+      if (v && [...sizeSel.options].some((o) => o.value === v)) sizeSel.value = v;
+      refresh();
+      setInterval(refresh, 20000);
+    });
 </script>
 </body>
 </html>
