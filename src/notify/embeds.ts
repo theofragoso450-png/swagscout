@@ -94,7 +94,9 @@ export function buildDealEmbed(deal: Deal): EmbedPayload {
 
   const thumb = safeUrl(l.imageUrl);
   return {
-    title: l.title.slice(0, 250),
+    // escape then cap: the embed title renders markdown, so a marketplace
+    // title must go through the same escaper the fields use
+    title: bounded(l.title, 250),
     url: safeUrl(l.url) ?? undefined,
     color: colorFor(deal.score),
     fields,
