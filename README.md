@@ -18,11 +18,11 @@ Verify any time with `npm run smoke` — it polls every enabled market once and 
 
 ## Deal detection (both engines)
 
-1. **Threshold rules** — per-brand USD caps with exclude terms (reps, wallets, fragrances…), e.g. *"CDG shirts ≤ $120"*, *"Yohji mainline ≤ $350"*. Predictable, instant. See `src/config/rules.ts`.
+1. **Threshold rules** — per-brand USD caps with exclude terms (reps, wallets, fragrances…), e.g. *"CDG shirts ≤ $120"*, *"Yohji mainline ≤ $350"*. Predictable, instant. Junk/damaged grades (「ジャンク」, damaged, for parts — detected from the title) must clear half the cap (`junkFactor`, per rule; `conditionCaps` for exact overrides). See `src/config/rules.ts`.
 2. **Cross-market comps** — fuzzy-matches the same item across markets (token overlap + trigram similarity on titles, brand slug enforced, price-band prefilter) and alerts when a listing sits **≥35% below the median** of ≥3 comparable listings across the last 14 days. This works across the JP↔West divide — e.g. a Yahoo JP piece 60% under its Grailed comps.
 3. **Score** — thresholds (40) + comp discount depth (≤50) + price-drop bonus (15) + auction-ending-soon urgency (10). Drives embed color and dashboard sort.
 
-Price-drop detection: re-seen listings that drop ≥3% re-alert with the old→new price.
+Price-drop detection: re-seen listings that drop ≥3% re-alert with the old→new price. Every native-price move is also appended to an append-only `price_events` ledger (pruned with its listing; a pure FX-rate move writes nothing), so drop history stays queryable even though deals keep one row per listing.
 
 ## Quick start
 
@@ -42,13 +42,15 @@ Requirements: **Node 23+** (uses the built-in `node:sqlite` — no native compil
 1. Create an app at <https://discord.com/developers> → Bot → Reset Token → put it in `DISCORD_TOKEN`.
 2. Invite the bot with the `bot` + `applications.commands` scopes (no special permissions needed beyond sending messages in the target channels).
 3. In Discord: `/watch brand:raf` in the channel that should receive Raf Simons alerts, `/watch brand:all` for everything, optionally with `min_score` and `size`.
-4. Commands: `/watch` `/unwatch` `/brands` `/status` `/deals` `/finds`.
+4. Commands: `/watch` `/unwatch` `/brands` `/status` `/deals` `/finds` `/velocity`.
 
-**Filters:** a subscription can combine `brand`, `min_score`, and `size`. `size` is an exact, case-insensitive match against the size extracted at ingest (`M`, `28`, `W34`, …) — listings without a size never match a size-filtered channel. Re-running `/watch` for the same brand updates that subscription; omitting `size` clears the filter. Example: `/watch brand:yohji min_score:50 size:M` alerts only Yohji pieces in M scoring 50+.
+**Filters:** a subscription can combine `brand`, `min_score`, and `size`. `size` is an exact, case-insensitive match against the size extracted at ingest (`M`, `28`, `W34`, …) — listings without a size never match a size-filtered channel. Re-running `/watch` for the same brand updates that subscription; omitting `size` clears the filter. Example: `/watch brand:yohji min_score:50 size:M` alerts only Yohji pieces in M scoring 50+. Subscriptions also steer polling: once any `/watch` exists, the poller queries those brands (falling back to the default list when none match).
 
 **`/deals` previews your channel's alerts:** it applies the same matching logic as alert routing (brand + min_score + size) to recent deals, so what it shows is exactly what that channel would be alerted about. Without subscriptions it falls back to all recent deals.
 
-**`/finds` ranks the day's top 10 finds:** only comp-backed deals (a cross-market median they sit below) can rank, scored on rarity — how far below the median and how many listings back it — plus price significance (a 50% cut on a $2,000 coat outranks one on a $60 shirt). Each result shows a finds score and rarity tier (S/A/B/C); `hours: <n>` widens the look-back window (1–168h, default 24).
+**`/finds` ranks the day's top 10 finds:** only comp-backed deals (a cross-market median they sit below) can rank, scored on rarity — how far below the median and how many listings back it — plus price significance (a 50% cut on a $2,000 coat outranks one on a $60 shirt), sell-through (brands whose stock vanishes earn up to 10 extra points; a ⚡ Fast mover label appears at gone-now share ≥ 0.5 — absence is never called a sale), and condition (a junk/damaged grade keeps half its comp evidence and is capped at B tier). Each result shows a finds score and rarity tier (S/A/B/C); `hours: <n>` widens the look-back window (1–168h, default 24).
+
+**`/velocity` reads brand churn:** gone-within-48h over the brand's last 20 sightings (optional `observations: 1–50`), with the same honest labels as the dashboard's Brand velocity row.
 
 **Daily finds digest:** with a bot token set, the bot posts the top 10 finds of the last 24h to every subscribed channel once a day — `DIGEST_HOUR_JST=8
 ` schedules it at 08:00 JST (any hour 0–23 works; unset disables). Restarts never double-post (the sent slot is recorded in the store), and a boot after the hour still delivers that morning's digest.
@@ -65,18 +67,19 @@ Register at <https://developer.ebay.com> (free "Individual" account is fine), cr
 
 All via environment variables — see `.env.example`. Highlights:
 
-- `SWAGSCOUT_WATCH` — comma-separated brand keys to poll (default: curated 17-brand list, incl. Bape, Evisu, early-2000s Supreme)
+- `SWAGSCOUT_WATCH` — comma-separated brand keys to poll (default when no `/watch` subscriptions exist: curated 17-brand list, incl. Bape, Evisu, early-2000s Supreme)
+- `FX_REFRESH_HOURS` — hours between live USD/JPY/EUR/GBP rate refreshes (default 24); last good rates are cached in the store, and `0` pins the built-in static table
 - `POLL_<MARKET>` — base interval in seconds per market (jitter added on top)
 - `COMP_ROUND_USD` — price-band rounding for comp grouping (default 50)
 - `RATE_LIMIT_RPM` — per-host politeness cap (default 12)
 - `DISCORD_ALLOWED_CHANNELS` — channel allow-list for the bot
 - `BROWSER_PROXY` — optional proxy for browser-based markets (see Grailed note above). Include credentials in the URL (`http://user:pass@host:port`); they are applied to the browser's proxy auth automatically. Run `npm run doctor:proxy` after wiring it: it prints direct vs proxied egress IPs, verifies a real Chromium session through the proxy, and fires one live Grailed probe.
 
-Brand catalog (38 brands with English + Japanese aliases — CDG, Number (N)ine, Yohji, Issey, Raf, Undercover, Nigo-era BAPE, Evisu, early-2000s Supreme, and more) lives in `src/config/brands.ts`; default thresholds in `src/config/rules.ts`. Edit those files to tune the watchlist — the /brands command lists every key.
+Brand catalog (39 brands with English + Japanese aliases — CDG, Number (N)ine, Yohji, Y's, Issey, Raf, Undercover, Nigo-era BAPE, Evisu, early-2000s Supreme, and more) lives in `src/config/brands.ts`; default thresholds in `src/config/rules.ts`. Edit those files to tune the watchlist — the /brands command lists every key.
 
 ## Dashboard
 
-`http://localhost:3080` — live deal feed with market/brand filters, text search, score/price sort, proxy links, and a `/api/health` JSON endpoint for uptime monitors.
+`http://localhost:3080` — live deal feed with market/brand/size/condition filters ("Junk/damaged only" isolates repair-grade bargains), text search, score/price sort, proxy links, a Finds-of-the-day section ranked by the same score `/finds` uses, a Brand-velocity row (the `/velocity` metric), per-market health chips on the status line, and a `/api/health` JSON endpoint for uptime monitors.
 
 ## Deployment (24/7)
 
@@ -93,14 +96,16 @@ src/
 ├── index.ts              # boot: env → store → adapters → poller → discord → dashboard
 ├── smoke.ts              # one-shot live poll of every market (no Discord needed)
 ├── config/
-│   ├── brands.ts         # 38-brand catalog, EN + JP aliases, search terms per market
+│   ├── brands.ts         # 39-brand catalog, EN + JP aliases, search terms per market
 │   ├── rules.ts          # default threshold rules
 │   └── env.ts            # env parsing + defaults
 ├── markets/              # one adapter file per market (normalized Listing out)
 ├── core/
 │   ├── poller.ts         # rotation, jitter, circuit breakers, dedupe, price drops
 │   ├── store.ts          # node:sqlite persistence (listings, deals, subs)
-│   ├── normalize.ts      # brand match, size extraction, FX, canonical keys
+│   ├── normalize.ts      # brand match, size/condition extraction, FX, canonical keys
+│   ├── recompute.ts      # boot-time pipeline catch-up (stale rows re-scored on PIPELINE_VERSION bump)
+│   ├── retention.ts      # nightly prune of stale listings + their deals/price events
 │   ├── comps.ts          # trigram/Jaccard fuzzy comp matching + median
 │   ├── score.ts          # deal evaluation (thresholds + comps → score)
 │   ├── fx.ts             # currency → USD
@@ -118,7 +123,7 @@ Adding a market = one new adapter file in `src/markets/` implementing `MarketAda
 npm test
 ```
 
-52 unit/integration tests: Yahoo + Mercari parsers against HTML fixtures, brand matching (EN + JP), normalization/FX, threshold rules, scoring, proxy links, comp matching, and the SQLite store. Scrapers are fixture-based so CI never hits live sites; use `npm run smoke` for the live check, `npm run smoke:drift` to boot the full stack on a throwaway DB/port, run one live poll round, and assert zero drift between stored and computed brand/size values (Grailed is exempt from the size check — its adapter passes explicit sizes), or `npm run watch:fuzzy [ISO-since]` to audit any window of the live DB for fuzzy-path brand matches (read-only; `DB_PATH` selects the database).
+350 tests across 38 files: Yahoo + Mercari parsers against HTML fixtures, brand matching (EN + JP), normalization/FX, threshold rules, scoring, proxy links, comp matching, and the SQLite store. Scrapers are fixture-based so CI never hits live sites; use `npm run smoke` for the live check, `npm run smoke:drift` to boot the full stack on a throwaway DB/port, run one live poll round, and assert zero drift between stored and computed brand/size values (Grailed is exempt from the size check — its adapter passes explicit sizes), or `npm run watch:fuzzy [ISO-since]` to audit any window of the live DB for fuzzy-path brand matches (read-only; `DB_PATH` selects the database).
 
 ## Legal note
 

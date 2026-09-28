@@ -8,13 +8,15 @@ Status at drafting: `main` at `4628bd5`, released as v0.4.0. Suite 304/304 acros
 
 ## v0.5.0
 
+**Delivered as v0.5.0 (tag + image asset).** Sell-through-weighted finds (#62), the price-event ledger (#63), `/velocity` (#64), condition-aware threshold rules (#65, `PIPELINE_VERSION` 7 recompute) — plus the condition thread unit 5 opened: condition-aware finds (#66) and the dashboard condition filter (#67). Unit 1's block-detection half (#58) shipped before the beta; its proxy half (unit 1B) remains operational — awaiting a residential `BROWSER_PROXY`. Unit 6 (subscription onboarding) was **not built**; the alert loop still has no production subscriptions.
+
 Ranked by value-for-cost, each with an honest exit gate. Evidence numbers are from the live store (12,618 listings, 8,624 deals) the day this was drafted.
 
 ### 1. Wake the West — M, shipped as two units
 
 **The gap.** The README's headline pitch is JP↔West arbitrage ("a Yahoo JP piece 60% under its Grailed comps"). The store says it has never happened: **Grailed 0 rows, eBay 0 rows**, and of **317 comp-backed deals, 0 cite a West-side listing**. Every comp set is JPY-only, so the cross-market engine — the product's actual edge — has never had two sides. Market health (#55) makes the absence visible (`grailed✓ 0/24h`), but visibility isn't rows.
 
-**Unit A — make Grailed able to answer (S).** Two parts: (a) the adapter currently resolves empty on a Cloudflare block page, so a blocked Grailed reads ✓ 0/24h — teach it to distinguish a block page from a genuinely empty result so market health shows `!`; (b) enable ingest through `BROWSER_PROXY` (already plumbed) with a residential proxy.
+**Unit A — make Grailed able to answer (S).** Two parts: (a) the adapter currently resolves empty on a Cloudflare block page, so a blocked Grailed reads ✓ 0/24h — teach it to distinguish a block page from a genuinely empty result so market health shows `!` *(shipped as #58)*; (b) enable ingest through `BROWSER_PROXY` (already plumbed) with a residential proxy *(the remaining operational step)*.
 
 **Unit B — eBay keys onboarding (S).** The adapter is code-ready against the official Browse API; it needs `EBAY_APP_ID`/`EBAY_CERT_ID` and a first-run smoke check. Document the exact free-tier registration steps in `.env.example` comments.
 
@@ -52,7 +54,7 @@ Ranked by value-for-cost, each with an honest exit gate. Evidence numbers are fr
 
 **Exit gate.** Test matrix: junk-condition listing above the cap doesn't fire; below a deeper adjusted cap it does; rules without condition caps behave exactly as today.
 
-### 6. Subscription onboarding — S
+### 6. Subscription onboarding — S *(not built; carried forward)*
 
 **The gap.** Zero Discord subscriptions exist: the alert loop — the product's delivery mechanism — has never fired in production. The digest, matching, and routing are all tested and unexercised.
 
