@@ -35,9 +35,11 @@ deletions.
 4. Push and open a PR against `main`. The description should cover what
    changed, why, and how it was verified (unit tests plus any live
    verification against real data).
-5. Wait for **both** required checks to pass on your exact head commit —
-   `ci` (typecheck, build, unit tests) and `docker` (image build).
-   Statuses on an older commit don't count.
+5. Wait for **all three** required checks to pass on your exact head
+   commit — `ci` (typecheck, build, unit tests), `docker` (image build),
+   and `flake-smoke` (the full suite run three times back-to-back, to
+   surface latent flakes before they merge). Statuses on an older
+   commit don't count.
 6. Squash-merge once green. The squash title carries the PR number:
    `Title of the change (#N)`.
 7. Delete the head branch **after** the PR is verified merged — as its
@@ -106,5 +108,6 @@ the bot creates one on boot and fills it by polling.
 - [ ] New UI passes the a11y contract (labels, alt, live regions,
       reduced motion)
 - [ ] `PIPELINE_VERSION` bumped if stored fields changed meaning
-- [ ] Both required checks green on the head commit before merge
+- [ ] All three required checks (`ci`, `docker`, `flake-smoke`) green on
+      the head commit before merge
 - [ ] Head branch deleted after merge — as a separate, verified step
