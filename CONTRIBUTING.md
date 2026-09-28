@@ -72,6 +72,16 @@ that breaks them does not merge:
 - **No fabricated counts.** Wire payloads report real post-filter totals
   (e.g. `matched` vs the rendered `shown` page), and honest framing
   applies to derived metrics too — absence is not proof of sale.
+- **Time-boundary honesty in tests.** If a call's freshness cutoff can
+  equal the seed writes' exact millisecond (the classic case is probing
+  a window with `0` hours while the query defaults `now` to
+  `Date.now()`), pass an explicit `now` pinned away from the writes —
+  `>=` comparisons become clock-tick dependent otherwise, and the flake
+  only reproduces on fast CI machines. Hour-scale seed offsets
+  (`Date.now() - hoursAgo * 3_600_000`) are inherently safe, and
+  same-millisecond `ORDER BY foundAt` sites are protected by the
+  `rowid DESC` tiebreaker in the store's queries. (This exact flake
+  shipped once and was fixed in #71.)
 
 ## Running the app locally
 
