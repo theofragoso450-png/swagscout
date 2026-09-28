@@ -111,3 +111,33 @@ the bot creates one on boot and fills it by polling.
 - [ ] All three required checks (`ci`, `docker`, `flake-smoke`) green on
       the head commit before merge
 - [ ] Head branch deleted after merge — as a separate, verified step
+
+## Cutting a release
+
+Releases are tag-driven: pushing an annotated `vX.Y.Z` tag triggers the
+Release workflow, which builds the Docker image from that tag, exports
+it, and attaches it to the GitHub release. The checklist:
+
+1. **Tag from a clean, up-to-date `main`.** Annotated tags only — and
+   verify the tag points at the commit you meant to ship
+   (`git rev-list -n 1 vX.Y.Z`).
+2. **Create the GitHub release with curated notes right after pushing
+   the tag.** The workflow generates notes only if no release exists,
+   so publishing yours promptly means the image attaches to notes you
+   wrote; if the workflow wins the race, edit its generated body
+   instead of starting over. Group the notes by theme from the merged
+   PRs since the last tag — say what changed and why, not just which
+   PR numbers merged.
+3. **Wait for the workflow and verify the asset.** The release is not
+   done until `swagscout-image-vX.Y.Z.tar.gz` is attached and the
+   Release run is green. Re-runs are idempotent: the upload replaces
+   the existing asset rather than duplicating it.
+4. **Retiring a prerelease is a banner, never a deletion.** Keep it
+   flagged as a prerelease, prepend a deprecation notice that links
+   the successor and names the concrete reasons not to deploy it, and
+   leave the original notes intact beneath the banner. Make the edit
+   idempotent, so re-running it cannot double the banner.
+
+A release is done when the tag sits on the intended commit, the notes
+read as an honest changelog, the image asset is attached, and any
+retired prereleases carry their banner.
