@@ -56,21 +56,24 @@ const PAGE = `
 <title>SwagScout — archive fashion deals</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Crect%20width='16'%20height='16'%20rx='3'%20fill='%230d1117'/%3E%3Ccircle%20cx='8'%20cy='8'%20r='4'%20fill='%233fb950'/%3E%3C/svg%3E">
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: dark; --gutter: 28px; }
   * { box-sizing: border-box; }
   body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:#0d1117; color:#e6edf3; -webkit-font-smoothing:antialiased; }
-  header { padding:22px 28px; border-bottom:1px solid #21262d; display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
+  header { padding:22px var(--gutter); border-bottom:1px solid #21262d; display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
   h1 { font-size:18px; margin:0; letter-spacing:.5px; }
   h1 span { color:#3fb950; }
   .sub { color:#8b949e; font-size:13px; }
   .tagline { color:#8b949e; font-size:12.5px; margin-top:2px; }
-  .bar { padding:14px 28px; display:flex; gap:8px; flex-wrap:wrap; border-bottom:1px solid #21262d; }
+  .bar { padding:14px var(--gutter); display:flex; gap:8px; flex-wrap:wrap; border-bottom:1px solid #21262d; }
   select, input { background:#161b22; color:#e6edf3; border:1px solid #30363d; border-radius:8px; padding:7px 10px; font-size:13px; transition:border-color .15s, background .15s; }
   select:hover, input:hover { border-color:#3d444d; }
   select:focus-visible, input:focus-visible { outline:none; border-color:#3fb950; box-shadow:0 0 0 3px rgba(63,185,80,.13); }
   .title a:focus-visible, .proxies a:focus-visible, .link:focus-visible { outline:2px solid #3fb950; outline-offset:2px; border-radius:4px; }
   select { cursor:pointer; }
-  main { padding: 18px 28px 28px; }
+  main { padding: 18px var(--gutter) 28px; }
+  /* Skip link: first tab stop on the page; hidden until focused */
+  .skip { position:absolute; left:-9999px; top:0; background:#161b22; color:#e6edf3; padding:8px 12px; border-radius:8px; z-index:10; }
+  .skip:focus, .skip:focus-visible { left:8px; top:8px; }
   .deal { border:1px solid #21262d; border-radius:12px; padding:14px 16px; margin-bottom:12px; display:flex; gap:14px; background:#161b22; transition:border-color .15s, transform .15s; }
   .deal:hover { border-color:#3d444d; transform:translateY(-1px); }
   .deal img { width:76px; height:76px; object-fit:cover; border-radius:10px; background:#21262d; flex:none; }
@@ -91,9 +94,21 @@ const PAGE = `
   .badge.miss { color:#8b949e; font-style:italic; }
   .reasons { font-size:12px; color:#d29922; margin-top:4px; }
   .proxies a { color:#58a6ff; font-size:12px; margin-right:8px; text-decoration:none; }
-  #finds, #velocity { padding: 0 28px; }
-  .results { font-size:12px; color:#8b949e; padding:12px 28px 10px; min-height:16px; }
-  .chips-row { padding:12px 28px 0; }
+  #finds, #velocity { padding: 0 var(--gutter); }
+  .results { font-size:12px; color:#8b949e; padding:12px var(--gutter) 10px; min-height:16px; }
+  .results:focus { outline:2px solid #3fb950; outline-offset:2px; border-radius:4px; }
+  .chips-row { padding:12px var(--gutter) 0; }
+  /* the row hosts focus after a chip removal (the clicked button unmounts);
+     contents carry their own focus treatments */
+  #chipsRow:focus { outline:none; }
+  #chipsRow:focus-visible { outline:2px solid #3fb950; outline-offset:2px; }
+  /* small screens: tighter shared gutter + real touch targets on chip removes */
+  @media (max-width: 500px) {
+    :root { --gutter: 16px; }
+    .fchip { padding:3px 6px 3px 12px; }
+    .fchip button { padding:4px 8px; font-size:15px; }
+    .deal img, .imgph { width:60px; height:60px; }
+  }
   .chips-row:empty { padding:0; }
   .fchip { border:1px solid #30363d; background:#161b22; border-radius:999px; padding:1px 4px 1px 10px; font-size:11px; color:#e6edf3; margin-right:8px; margin-bottom:4px; display:inline-flex; align-items:center; gap:6px; }
   .fchip button { background:none; border:none; color:#8b949e; cursor:pointer; font-size:13px; line-height:1; padding:0 4px; border-radius:999px; }
@@ -130,6 +145,7 @@ const PAGE = `
 </style>
 </head>
 <body>
+<a class="skip" href="#feed">Skip to deals</a>
 <header>
   <div>
     <h1>Swag<span>Scout</span></h1>
@@ -158,8 +174,8 @@ const PAGE = `
   <div id="velocityRow" aria-label="How fast each brand's listings vanish, over its last 20 sightings"></div>
 </section>
 <div id="chipsRow" class="chips-row"></div>
-<div id="results" class="results" role="status" aria-live="polite"></div>
-<main id="feed"><div class="empty">Scouting markets — first deals land within minutes.</div></main>
+<div id="results" class="results" role="status" aria-live="polite" tabindex="-1"></div>
+<main id="feed" tabindex="-1"><div class="empty"><div class="imgph" aria-hidden="true"></div><div>Scouting markets — first deals land within minutes.</div></div></main>
 <script>
   const markets = ${JSON.stringify(ALL_MARKETS.map((m) => ({ id: m, label: MARKET_LABEL[m] })))};
   const brands = ${JSON.stringify(BRANDS.map((b) => ({ key: b.key, name: b.name })))};
@@ -222,6 +238,15 @@ const PAGE = `
       const res = await fetch("/api/velocity");
       data = await res.json();
     } catch { return; }
+    if (!data.brands || !data.brands.length) {
+      // same empty treatment as the finds section, not blank space
+      row.textContent = "";
+      const note = document.createElement("div");
+      note.className = "finds-empty";
+      note.textContent = "No brand sightings yet — velocity appears after the first poll rounds.";
+      row.appendChild(note);
+      return;
+    }
     row.textContent = "";
     for (const v of data.brands || []) {
       const chip = document.createElement("span");
@@ -266,6 +291,7 @@ const PAGE = `
     if (s && s !== SORT_DEFAULT) chips.push(["sort", "Sort: " + optionText(document.getElementById("sort"), s)]);
     if (q) chips.push(["q", "Title: " + (q.length > 24 ? q.slice(0, 24) + "…" : q)]);
     if (!chips.length) return;
+    row.tabIndex = -1;
     for (const [id, label] of chips) {
       const chip = document.createElement("span");
       chip.className = "fchip";
@@ -280,11 +306,19 @@ const PAGE = `
     const all = document.createElement("button");
     all.className = "fclear";
     all.textContent = "Clear all";
-    all.addEventListener("click", clearFilters);
+    all.addEventListener("click", () => {
+      const row = document.getElementById("chipsRow");
+      if (row) row.focus();
+      clearFilters();
+    });
     row.appendChild(all);
   }
   function removeFilter(id) {
     document.getElementById(id).value = id === "sort" ? SORT_DEFAULT : "";
+    // the clicked button is about to be unmounted by the re-render: move
+    // focus back to the chips row so keyboard users are not dumped to body
+    const row = document.getElementById("chipsRow");
+    if (row) row.focus();
     refresh();
   }
   // Mirror active filters into the address bar via replaceState: shareable,

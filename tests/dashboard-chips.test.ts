@@ -68,9 +68,10 @@ describe("active-filter chips row", () => {
     const html = await page(await boot());
     // per-chip removal clears the control (sort resets to "found" — it has
     // no empty option), then refreshes (re-rendering chips and the URL)
-    expect(html).toMatch(/function removeFilter\(id\) \{\s*\r?\n\s*document\.getElementById\(id\)\.value = id === "sort" \? SORT_DEFAULT : "";\s*\r?\n\s*refresh\(\);/);
-    // Clear all reuses clearFilters, so chips and URL reset together
-    expect(html).toMatch(/all\.addEventListener\("click", clearFilters\);/);
+    expect(html).toMatch(/function removeFilter\(id\) \{\s*\r?\n\s*document\.getElementById\(id\)\.value = id === "sort" \? SORT_DEFAULT : "";\s*\r?\n[\s\S]*?row\.focus\(\);\s*\r?\n\s*refresh\(\);/);
+    // Clear all routes through clearFilters (focus restoration pinned in
+    // dashboard-polish.test.ts), so chips and URL reset together
+    expect(html).toContain("clearFilters();");
     // chips are user input: built with DOM APIs, never markup interpolation
     expect(html).toContain("row.textContent = \"\";");
     expect(html).toContain("chip.appendChild(document.createTextNode(label + \" \"));");
