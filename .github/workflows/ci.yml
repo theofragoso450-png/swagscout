@@ -34,6 +34,35 @@ jobs:
 
       - run: npm test
 
+  # Three back-to-back suite rounds in fresh processes: latent flakes
+  # (clock boundaries, timing pressure between parallel workers) rarely
+  # fire on a single CI round but surface when the suite runs repeatedly.
+  # Motivating case: the sellThroughByBrand clock-boundary flake (#71) —
+  # it only ever reproduced on fast CI machines, never locally.
+  # Deliberately NO vitest retry option: a retry would mask exactly the
+  # flake this job exists to expose. Fail-fast via bash -e: the first
+  # failing round aborts the step with its full log.
+  flake-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Suite x3, fail-fast
+        run: |
+          for round in 1 2 3; do
+            echo "::group::Suite round $round"
+            npm test
+            echo "::endgroup::"
+          done
+
   docker:
     runs-on: ubuntu-latest
     steps:
