@@ -47,9 +47,9 @@ describe("active-filter chips row", () => {
     expect(html).toMatch(/syncUrl\(\);\s*\r?\n\s*renderChips\(\);/);
   });
 
-  it("covers every non-default filter with a human-readable label", async () => {
+  it("covers every non-default control with a human-readable label, sort included", async () => {
     const html = await page(await boot());
-    for (const label of ['"Market: "', '"Brand: "', '"Size: "', '"Condition: "', '"Title: "']) {
+    for (const label of ['"Market: "', '"Brand: "', '"Size: "', '"Condition: "', '"Sort: "', '"Title: "']) {
       expect(html).toContain(label);
     }
     // labels resolve ids to the names the selects display, falling back to
@@ -57,15 +57,18 @@ describe("active-filter chips row", () => {
     expect(html).toContain("marketLabel(m)");
     expect(html).toContain("brandLabel(b)");
     expect(html).toContain("conditionLabels[c] || c");
+    // sort chips label from the option text and only when non-default
+    expect(html).toContain("optionText(document.getElementById(\"sort\"), s)");
+    expect(html).toContain('if (s && s !== SORT_DEFAULT)');
     // free text truncates instead of stretching the chip row
     expect(html).toContain("q.length > 24");
   });
 
-  it("removes exactly one filter per chip click, via textContent only", async () => {
+  it("removes exactly one control per chip click, resetting sort to its default", async () => {
     const html = await page(await boot());
-    // per-chip removal clears only that control, then refreshes (which
-    // re-renders chips and mirrors the URL)
-    expect(html).toMatch(/function removeFilter\(id\) \{\s*\r?\n\s*document\.getElementById\(id\)\.value = "";\s*\r?\n\s*refresh\(\);/);
+    // per-chip removal clears the control (sort resets to "found" — it has
+    // no empty option), then refreshes (re-rendering chips and the URL)
+    expect(html).toMatch(/function removeFilter\(id\) \{\s*\r?\n\s*document\.getElementById\(id\)\.value = id === "sort" \? SORT_DEFAULT : "";\s*\r?\n\s*refresh\(\);/);
     // Clear all reuses clearFilters, so chips and URL reset together
     expect(html).toMatch(/all\.addEventListener\("click", clearFilters\);/);
     // chips are user input: built with DOM APIs, never markup interpolation

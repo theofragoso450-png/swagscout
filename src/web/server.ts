@@ -238,6 +238,14 @@ const PAGE = `
   // remove button, plus Clear all. Built with DOM APIs only — filter values
   // are user input and must never touch markup. Labels resolve ids to the
   // human names the selects display; long free-text queries truncate.
+  // Sort is chipped too (every non-default control mirrors here); its
+  // removal resets to "Newest" ("found"), the only control without an
+  // empty option.
+  const SORT_DEFAULT = "found";
+  const optionText = (sel, v) => {
+    const o = [...sel.options].find((o) => o.value === v);
+    return o ? o.textContent : v;
+  };
   const marketLabel = (id) => (markets.find((x) => x.id === id) || {}).label || id;
   const brandLabel = (k) => (brands.find((x) => x.key === k) || {}).name || k;
   function renderChips() {
@@ -249,11 +257,13 @@ const PAGE = `
     const b = document.getElementById("brand").value;
     const z = sizeSel.value;
     const c = document.getElementById("condition").value;
+    const s = document.getElementById("sort").value;
     const q = document.getElementById("q").value;
     if (m) chips.push(["market", "Market: " + marketLabel(m)]);
     if (b) chips.push(["brand", "Brand: " + brandLabel(b)]);
     if (z) chips.push(["size", "Size: " + z]);
     if (c) chips.push(["condition", "Condition: " + (conditionLabels[c] || c)]);
+    if (s && s !== SORT_DEFAULT) chips.push(["sort", "Sort: " + optionText(document.getElementById("sort"), s)]);
     if (q) chips.push(["q", "Title: " + (q.length > 24 ? q.slice(0, 24) + "…" : q)]);
     if (!chips.length) return;
     for (const [id, label] of chips) {
@@ -274,7 +284,7 @@ const PAGE = `
     row.appendChild(all);
   }
   function removeFilter(id) {
-    document.getElementById(id).value = "";
+    document.getElementById(id).value = id === "sort" ? SORT_DEFAULT : "";
     refresh();
   }
   // Mirror active filters into the address bar via replaceState: shareable,
