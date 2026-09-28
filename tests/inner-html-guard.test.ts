@@ -44,6 +44,9 @@ const ALLOWED_PREFIXES = [
   "d.endsInMin != null",
   "d.rank != null",
   "!isFind && d.condition ?",
+  // condition filter: a server-computed ternary (c === "junk") choosing
+  // between two fully static <option> strings — no interpolated value inside.
+  "c ?",
   "!isFind && d.endsInMin != null",
   // missingForLabel: server-composed via fmtDuration from the store's ISO stamp
   "!isFind && d.missingForLabel ?",

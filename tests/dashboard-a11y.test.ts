@@ -52,7 +52,7 @@ describe("dashboard accessibility contract", () => {
   it("declares the document language and labels every filter control", async () => {
     const html = await page(await boot());
     expect(html).toContain('<html lang="en">');
-    for (const label of ["Market", "Brand", "Size", "Sort by", "Filter titles"]) {
+    for (const label of ["Market", "Brand", "Size", "Condition", "Sort by", "Filter titles"]) {
       expect(html).toContain(`aria-label="${label}"`);
     }
   });
