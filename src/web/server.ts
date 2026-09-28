@@ -91,7 +91,16 @@ const PAGE = `
   .badge.miss { color:#8b949e; font-style:italic; }
   .reasons { font-size:12px; color:#d29922; margin-top:4px; }
   .proxies a { color:#58a6ff; font-size:12px; margin-right:8px; text-decoration:none; }
-  .results { font-size:12px; color:#8b949e; padding:12px 0 10px; min-height:16px; }
+  #finds, #velocity { padding: 0 28px; }
+  .results { font-size:12px; color:#8b949e; padding:12px 28px 10px; min-height:16px; }
+  .chips-row { padding:12px 28px 0; }
+  .chips-row:empty { padding:0; }
+  .fchip { border:1px solid #30363d; background:#161b22; border-radius:999px; padding:1px 4px 1px 10px; font-size:11px; color:#e6edf3; margin-right:8px; margin-bottom:4px; display:inline-flex; align-items:center; gap:6px; }
+  .fchip button { background:none; border:none; color:#8b949e; cursor:pointer; font-size:13px; line-height:1; padding:0 4px; border-radius:999px; }
+  .fchip button:hover { color:#f0883e; }
+  .fchip button:focus-visible, .fclear:focus-visible { outline:2px solid #3fb950; outline-offset:1px; }
+  .fclear { background:none; border:none; color:#58a6ff; cursor:pointer; font-size:11px; padding:2px 4px; }
+  .fclear:hover { text-decoration:underline; }
   .empty { color:#8b949e; padding:40px 0; text-align:center; font-size:14px; position:relative; }
   .empty .imgph { width:44px; height:44px; margin:0 auto 10px; display:block; opacity:.5; }
   .link { background:none; border:none; color:#58a6ff; cursor:pointer; font-size:13px; padding:2px 4px; }
@@ -148,6 +157,7 @@ const PAGE = `
   <h2 class="finds-head">Brand velocity</h2>
   <div id="velocityRow" aria-label="How fast each brand's listings vanish, over its last 20 sightings"></div>
 </section>
+<div id="chipsRow" class="chips-row"></div>
 <div id="results" class="results" role="status" aria-live="polite"></div>
 <main id="feed"><div class="empty">Scouting markets — first deals land within minutes.</div></main>
 <script>
@@ -224,6 +234,49 @@ const PAGE = `
   }
   loadVelocity();
   setInterval(loadVelocity, 60000);
+  // Active-filter chips: one per non-default control, each with a one-click
+  // remove button, plus Clear all. Built with DOM APIs only — filter values
+  // are user input and must never touch markup. Labels resolve ids to the
+  // human names the selects display; long free-text queries truncate.
+  const marketLabel = (id) => (markets.find((x) => x.id === id) || {}).label || id;
+  const brandLabel = (k) => (brands.find((x) => x.key === k) || {}).name || k;
+  function renderChips() {
+    const row = document.getElementById("chipsRow");
+    if (!row) return;
+    row.textContent = "";
+    const chips = [];
+    const m = document.getElementById("market").value;
+    const b = document.getElementById("brand").value;
+    const z = sizeSel.value;
+    const c = document.getElementById("condition").value;
+    const q = document.getElementById("q").value;
+    if (m) chips.push(["market", "Market: " + marketLabel(m)]);
+    if (b) chips.push(["brand", "Brand: " + brandLabel(b)]);
+    if (z) chips.push(["size", "Size: " + z]);
+    if (c) chips.push(["condition", "Condition: " + (conditionLabels[c] || c)]);
+    if (q) chips.push(["q", "Title: " + (q.length > 24 ? q.slice(0, 24) + "…" : q)]);
+    if (!chips.length) return;
+    for (const [id, label] of chips) {
+      const chip = document.createElement("span");
+      chip.className = "fchip";
+      chip.appendChild(document.createTextNode(label + " "));
+      const x = document.createElement("button");
+      x.setAttribute("aria-label", "Remove filter " + label);
+      x.textContent = "×";
+      x.addEventListener("click", () => removeFilter(id));
+      chip.appendChild(x);
+      row.appendChild(chip);
+    }
+    const all = document.createElement("button");
+    all.className = "fclear";
+    all.textContent = "Clear all";
+    all.addEventListener("click", clearFilters);
+    row.appendChild(all);
+  }
+  function removeFilter(id) {
+    document.getElementById(id).value = "";
+    refresh();
+  }
   // Mirror active filters into the address bar via replaceState: shareable,
   // reload-stable, and no history entry per 20-second poll. Defaults are
   // omitted so an all-defaults view carries a clean URL.
@@ -263,6 +316,7 @@ const PAGE = `
     } catch { markLive(false); return; }
     markLive(true);
     syncUrl();
+    renderChips();
     const feed = document.getElementById("feed");
     const results = document.getElementById("results");
     if (!data.deals.length) {
