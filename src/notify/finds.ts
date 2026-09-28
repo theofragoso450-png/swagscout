@@ -1,5 +1,6 @@
 import type { Deal } from "../types.js";
 import { compFacts } from "../core/reasons.js";
+import { extractCondition } from "../core/normalize.js";
 
 /**
  * "Finds of the day" ranking — surfaces the most notable comp-backed deals,
@@ -7,7 +8,10 @@ import { compFacts } from "../core/reasons.js";
  * median is), price significance (a 50% cut on a $2000 coat matters more
  * than one on a $60 shirt), and sell-through (pieces from brands whose stock
  * tends to vanish are likelier to be gone soon — absence ≠ sale, so the
- * labels say "moves fast", never "sold"). Pure so it is unit-testable.
+ * labels say "moves fast", never "sold"), and condition (a junk/damaged
+ * grade keeps only half its comp evidence and can never present as A tier —
+ * the same judgment the threshold caps make via rules' junkFactor). Pure so
+ * it is unit-testable.
  *
  * Only comp-backed deals rank: threshold deals all sit at the floor score and
  * would produce an arbitrary tie-break order rather than a meaningful ranking.
@@ -32,12 +36,25 @@ export type VelocityMap = ReadonlyMap<string, { share: number }>;
  */
 export const FAST_MOVER_SHARE = 0.5;
 
+/**
+ * Score multiplier for a degraded-grade piece (junk/damaged), matching the
+ * shape of rules.ts's junkFactor cap policy: a broken piece is worth half.
+ * A discount that real for a damaged item is market-corrected, not a find.
+ */
+const DEGRADED_CONDITION_FACTOR = 0.5;
+
+/** Condition from the title the ranking actually sees — the stored column is
+ *  only a display cache (the rule score.ts established). */
+function conditionOf(deal: Deal): string | undefined {
+  return extractCondition(deal.listing.title);
+}
+
 export interface FindsScoreContext {
   /** Brand-level sell-through; absent or missing brand = no velocity points. */
   velocity?: VelocityMap;
 }
 
-/** 0–30 by discount depth, 0–10 by comp-sample confidence, 0–20 by price class, 0–10 by sell-through. */
+/** 0–30 by discount depth, 0–10 by comp-sample confidence, 0–20 by price class, 0–10 by sell-through; halved for junk/damaged. */
 export function findsScore(deal: Deal, ctx: FindsScoreContext = {}): number {
   const comp = compFacts(deal.reasons, deal.listing.priceUsd);
   if (!comp) return 0;
@@ -45,7 +62,9 @@ export function findsScore(deal: Deal, ctx: FindsScoreContext = {}): number {
   const samplePts = Math.min(10, Math.round(Math.log2(comp.sampleSize) * 2));
   const pricePts = Math.min(20, Math.round(Math.log10(Math.max(10, comp.medianUsd)) * 5));
   const velocityPts = velocityFactor(deal, ctx.velocity);
-  return rarityPts + samplePts + pricePts + velocityPts;
+  const raw = rarityPts + samplePts + pricePts + velocityPts;
+  const condition = conditionOf(deal);
+  return condition === "junk" ? Math.round(raw * DEGRADED_CONDITION_FACTOR) : raw;
 }
 
 /**
@@ -66,7 +85,13 @@ function velocityFactor(deal: Deal, velocity: VelocityMap | undefined): number {
   return Math.round(v.share * v.share * 10);
 }
 
-export function classifyRarity(score: number): Rarity {
+/**
+ * Score bands to tiers. A degraded-grade find is capped at B regardless of
+ * score: its discount is the market pricing the damage, so it may not wear
+ * an A/S badge that implies a bargain on a healthy piece.
+ */
+export function classifyRarity(score: number, condition?: string): Rarity {
+  if (condition === "junk") return score >= 25 ? "B" : "C";
   if (score >= 55) return "S";
   if (score >= 40) return "A";
   if (score >= 25) return "B";
@@ -110,5 +135,9 @@ export function rankFinds(
         a.deal.listing.foundAt.localeCompare(b.deal.listing.foundAt),
     )
     .slice(0, limit)
-    .map((x, i) => ({ ...x, rank: i + 1, rarity: classifyRarity(x.findsScore) }));
+    .map((x, i) => ({
+      ...x,
+      rank: i + 1,
+      rarity: classifyRarity(x.findsScore, conditionOf(x.deal)),
+    }));
 }
