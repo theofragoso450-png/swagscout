@@ -2,6 +2,8 @@
 
 > **New here? Never written code?** Follow [INSTALL.md](INSTALL.md) — a plain-language, step-by-step setup guide (Discord bot + Docker or Node) that assumes nothing.
 
+[![CI](https://github.com/theofragoso450-png/swagscout/actions/workflows/ci.yml/badge.svg)](https://github.com/theofragoso450-png/swagscout/actions/workflows/ci.yml)
+
 Self-hosted archive-fashion deal bot, inspired by [swagsearch.io](https://swagsearch.io/). It continuously polls **five resale markets**, detects **underpriced** archive pieces two different ways, and pushes rich **Discord alerts** with proxy-buying links — plus a live web dashboard.
 
 ## Markets
@@ -123,7 +125,21 @@ Adding a market = one new adapter file in `src/markets/` implementing `MarketAda
 npm test
 ```
 
-350 tests across 38 files: Yahoo + Mercari parsers against HTML fixtures, brand matching (EN + JP), normalization/FX, threshold rules, scoring, proxy links, comp matching, and the SQLite store. Scrapers are fixture-based so CI never hits live sites; use `npm run smoke` for the live check, `npm run smoke:drift` to boot the full stack on a throwaway DB/port, run one live poll round, and assert zero drift between stored and computed brand/size values (Grailed is exempt from the size check — its adapter passes explicit sizes), or `npm run watch:fuzzy [ISO-since]` to audit any window of the live DB for fuzzy-path brand matches (read-only; `DB_PATH` selects the database).
+365 tests across 40 files: Yahoo + Mercari parsers against HTML fixtures, brand matching (EN + JP), normalization/FX, threshold rules, scoring, proxy links, comp matching, and the SQLite store. Scrapers are fixture-based so CI never hits live sites; use `npm run smoke` for the live check, `npm run smoke:drift` to boot the full stack on a throwaway DB/port, run one live poll round, and assert zero drift between stored and computed brand/size values (Grailed is exempt from the size check — its adapter passes explicit sizes), or `npm run watch:fuzzy [ISO-since]` to audit any window of the live DB for fuzzy-path brand matches (read-only; `DB_PATH` selects the database).
+
+## CI & quality gates
+
+Every pull request — and every push to `main` — must clear **three required checks** before anything merges:
+
+| Check | What it does |
+|---|---|
+| `ci` | `tsc` typecheck, production build, and the full test suite on Node 24 |
+| `docker` | builds the container image, so a broken image never reaches a release tag |
+| `flake-smoke` | runs the **entire test suite three times back-to-back** — a fresh process each round — to smoke out latent flakes before they merge |
+
+The flake-smoke job exists because timing-dependent bugs (clock boundaries, parallel-worker scheduling pressure) rarely fire on a single CI round but surface on repeats — a flaky test fails the PR instead of surprising a merge later. Retries are deliberately not configured: masking a flake would defeat the job's purpose. Released Docker images attach to the [GitHub releases](../../releases) via a tag-triggered workflow and are boot-smoked nightly.
+
+Contributing? [CONTRIBUTING.md](CONTRIBUTING.md) covers the local gates, the PR checklist, and the conventions these tests enforce (markup-injection guard, accessibility contract, time-boundary honesty).
 
 ## Legal note
 
